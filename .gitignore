@@ -21,3 +21,14 @@ docs/logs/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Agentic/RAG artifacts
+data/rag_index/
+data/regulations/*.pdf
+
+# Local runtime artifacts
+logs/
+artifacts/
+.venv/
+__pycache__/
+.pytest_cache/
