@@ -1,0 +1,3 @@
+# Auditor prompt placeholder
+
+This version uses TF-IDF RAG deterministically (no LLM). Next step will introduce LLM grounded generation.

@@ -1,10 +1,42 @@
 import json
 import streamlit as st
 
+import sys
+from pathlib import Path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
 from src.model_adapter import analyze_contract
 from src.logger import save_run
 
 st.set_page_config(page_title="GenAI Contract Risk Analyzer", layout="wide")
+
+import os
+from pathlib import Path
+
+with st.sidebar:
+    st.header("Settings")
+    agentic_on = st.toggle("Agentic mode (5-agent)", value=False)
+    enforce_citations = st.toggle("Require regulation citations", value=True)
+    st.caption("Tip: add regulation PDFs under data/regulations/ and build index.")
+
+# Set feature flags for this Streamlit session
+if agentic_on:
+    os.environ["USE_AGENTIC"] = "1"
+else:
+    os.environ.pop("USE_AGENTIC", None)
+
+os.environ["REQUIRE_REG_CITATIONS"] = "1" if enforce_citations else "0"
+
+# RAG index status
+rag_path = Path("data/rag_index/reg_index.pkl")
+if rag_path.exists():
+    st.sidebar.success("RAG index found: data/rag_index/reg_index.pkl")
+else:
+    st.sidebar.warning("RAG index not found yet")
+
 
 st.title("GenAI Contract Risk Analyzer (Portfolio Demo)")
 st.caption("Enterprise-style outputs: schema contract, evidence, audit log, features, scoring breakdown, and exportable JSON.")
@@ -153,3 +185,31 @@ with right:
 - No finding is valid unless it has at least one evidence snippet.
                 """
             )
+
+# --- Agentic scorecard panel (if present in audit) ---
+
+try:
+    if 'result' in locals() and hasattr(result, 'audit') and result.audit:
+        # Find AGENTIC_RUN event
+        sc = None
+        for ev in result.audit:
+            if getattr(ev, "event", "") == "AGENTIC_RUN":
+                sc = (getattr(ev, "details", {}) or {}).get("scorecard")
+                break
+        if sc:
+            st.markdown("### Executive Risk Scorecard")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Overall Score", sc.get("overall_score", "NA"))
+            c2.metric("Risk Level", sc.get("risk_level", "NA"))
+            counts = sc.get("counts", {})
+            c3.metric("Needs Review", counts.get("needs_review", "NA"))
+            with st.expander("Top risks", expanded=True):
+                for item in sc.get("top_risks", [])[:5]:
+                    st.write(f"- [{item.get('severity','')}] {item.get('title','')}")
+            with st.expander("Recommended next steps", expanded=False):
+                for s in sc.get("recommended_next_steps", []):
+                    st.write(f"- {s}")
+            if sc.get("disclaimer"):
+                st.caption(sc["disclaimer"])
+except Exception:
+    pass

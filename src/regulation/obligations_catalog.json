@@ -1,0 +1,69 @@
+{
+  "EU": [
+    {
+      "obligation_id": "EU-OBL-001",
+      "title": "Transparency & Disclosure",
+      "requirement": "Provide required transparency notices and disclosures to relevant stakeholders.",
+      "applies_if": "AI/ML used in service delivery, automated decisioning, or user-facing AI.",
+      "severity_weight": 1.0
+    },
+    {
+      "obligation_id": "EU-OBL-002",
+      "title": "Risk Management System",
+      "requirement": "Maintain a documented risk management process covering foreseeable AI risks.",
+      "applies_if": "AI system development/deployment/operation is in scope.",
+      "severity_weight": 1.3
+    },
+    {
+      "obligation_id": "EU-OBL-003",
+      "title": "Data Governance",
+      "requirement": "Implement appropriate data governance measures (data quality, provenance, bias considerations).",
+      "applies_if": "AI model training/inference uses data that impacts outcomes.",
+      "severity_weight": 1.2
+    },
+    {
+      "obligation_id": "EU-OBL-004",
+      "title": "Human Oversight",
+      "requirement": "Ensure appropriate human oversight measures exist for AI outputs and decisions.",
+      "applies_if": "AI influences decisions with legal/material effects.",
+      "severity_weight": 1.2
+    },
+    {
+      "obligation_id": "EU-OBL-005",
+      "title": "Logging & Traceability",
+      "requirement": "Maintain logs/records enabling traceability and accountability of AI behavior.",
+      "applies_if": "AI systems are used in operational processes.",
+      "severity_weight": 1.1
+    }
+  ],
+  "AU": [
+    {
+      "obligation_id": "AU-OBL-001",
+      "title": "Privacy & Data Handling",
+      "requirement": "Ensure personal information handling aligns with applicable privacy requirements and contractual protections.",
+      "applies_if": "Personal information/PII is processed.",
+      "severity_weight": 1.1
+    },
+    {
+      "obligation_id": "AU-OBL-002",
+      "title": "Security Controls",
+      "requirement": "Implement security controls (access control, incident response, encryption as appropriate).",
+      "applies_if": "Sensitive data or critical systems are involved.",
+      "severity_weight": 1.2
+    },
+    {
+      "obligation_id": "AU-OBL-003",
+      "title": "Incident/Breach Notification",
+      "requirement": "Define notification timelines and responsibilities for security/privacy incidents.",
+      "applies_if": "Data processing and security obligations exist.",
+      "severity_weight": 1.2
+    },
+    {
+      "obligation_id": "AU-OBL-004",
+      "title": "Record Keeping",
+      "requirement": "Maintain records supporting compliance and auditability (logs, decisions, approvals).",
+      "applies_if": "Regulated or sensitive processing is performed.",
+      "severity_weight": 1.0
+    }
+  ]
+}
