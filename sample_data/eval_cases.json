@@ -1,0 +1,37 @@
+[
+  {
+    "id": "E-001",
+    "title": "Uncapped liability + consequential",
+    "text": "The Vendor shall be liable for all damages including consequential, indirect, special damages. Liability is uncapped.",
+    "expected_risk_level": "High",
+    "expected_categories": ["Liability"]
+  },
+  {
+    "id": "E-002",
+    "title": "Termination for convenience no cure",
+    "text": "Either party may terminate for convenience at any time upon written notice. No cure period is provided.",
+    "expected_risk_level": "Medium",
+    "expected_categories": ["Termination"]
+  },
+  {
+    "id": "E-003",
+    "title": "Neutral baseline",
+    "text": "This agreement describes services and payment terms. Standard confidentiality applies. No special liability clauses are stated.",
+    "expected_risk_level": "Low",
+    "expected_categories": []
+  },
+  {
+    "id": "E-004",
+    "title": "Both liability + termination",
+    "text": "Either party may terminate for convenience at any time upon notice. Vendor is liable for all damages including consequential. Liability is uncapped.",
+    "expected_risk_level": "High",
+    "expected_categories": ["Liability", "Termination"]
+  },
+  {
+    "id": "E-005",
+    "title": "Cure period present (should reduce termination signal)",
+    "text": "Either party may terminate upon material breach if not cured within 30 days after notice. Termination for convenience is not permitted.",
+    "expected_risk_level": "Low",
+    "expected_categories": []
+  }
+]
