@@ -1,69 +1,155 @@
 {
-  "EU": [
-    {
-      "obligation_id": "EU-OBL-001",
-      "title": "Transparency & Disclosure",
-      "requirement": "Provide required transparency notices and disclosures to relevant stakeholders.",
-      "applies_if": "AI/ML used in service delivery, automated decisioning, or user-facing AI.",
-      "severity_weight": 1.0
-    },
-    {
-      "obligation_id": "EU-OBL-002",
-      "title": "Risk Management System",
-      "requirement": "Maintain a documented risk management process covering foreseeable AI risks.",
-      "applies_if": "AI system development/deployment/operation is in scope.",
-      "severity_weight": 1.3
-    },
-    {
-      "obligation_id": "EU-OBL-003",
-      "title": "Data Governance",
-      "requirement": "Implement appropriate data governance measures (data quality, provenance, bias considerations).",
-      "applies_if": "AI model training/inference uses data that impacts outcomes.",
-      "severity_weight": 1.2
-    },
-    {
-      "obligation_id": "EU-OBL-004",
-      "title": "Human Oversight",
-      "requirement": "Ensure appropriate human oversight measures exist for AI outputs and decisions.",
-      "applies_if": "AI influences decisions with legal/material effects.",
-      "severity_weight": 1.2
-    },
-    {
-      "obligation_id": "EU-OBL-005",
-      "title": "Logging & Traceability",
-      "requirement": "Maintain logs/records enabling traceability and accountability of AI behavior.",
-      "applies_if": "AI systems are used in operational processes.",
-      "severity_weight": 1.1
-    }
+  "version": "0.2",
+  "last_updated": "2026-02-21",
+  "jurisdictions": [
+    "EU",
+    "AU"
   ],
-  "AU": [
+  "obligations": [
     {
-      "obligation_id": "AU-OBL-001",
-      "title": "Privacy & Data Handling",
-      "requirement": "Ensure personal information handling aligns with applicable privacy requirements and contractual protections.",
-      "applies_if": "Personal information/PII is processed.",
-      "severity_weight": 1.1
+      "obligation_id": "EU-AIA-TRANSPARENCY-01",
+      "jurisdiction": "EU",
+      "title": "Transparency to users (AI system interaction)",
+      "requirement": "Provide clear information to users that they are interacting with an AI system when applicable.",
+      "applies_if": "AI systems interacting directly with natural persons where required by the Act.",
+      "clause_types_applicable": [
+        "TRANSPARENCY",
+        "NOTICE",
+        "CONSUMER_DISCLOSURE"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "MEDIUM",
+      "tags": [
+        "transparency",
+        "user_notice"
+      ]
     },
     {
-      "obligation_id": "AU-OBL-002",
-      "title": "Security Controls",
-      "requirement": "Implement security controls (access control, incident response, encryption as appropriate).",
-      "applies_if": "Sensitive data or critical systems are involved.",
-      "severity_weight": 1.2
+      "obligation_id": "EU-AIA-DATA-GOV-01",
+      "jurisdiction": "EU",
+      "title": "Data governance and data quality (high-risk)",
+      "requirement": "Define data governance measures for training/validation/testing datasets (quality, relevance, representativeness).",
+      "applies_if": "High-risk AI systems as defined by the Act.",
+      "clause_types_applicable": [
+        "PRIVACY_DATA",
+        "DATA_PROCESSING",
+        "DATA_RETENTION",
+        "SECURITY"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "HIGH",
+      "tags": [
+        "data_governance",
+        "dataset_quality"
+      ]
     },
     {
-      "obligation_id": "AU-OBL-003",
-      "title": "Incident/Breach Notification",
-      "requirement": "Define notification timelines and responsibilities for security/privacy incidents.",
-      "applies_if": "Data processing and security obligations exist.",
-      "severity_weight": 1.2
+      "obligation_id": "EU-AIA-LOGGING-01",
+      "jurisdiction": "EU",
+      "title": "Logging / record-keeping for high-risk AI",
+      "requirement": "Enable automatic event logging and keep logs to support traceability and compliance.",
+      "applies_if": "High-risk AI systems; where logging obligations apply.",
+      "clause_types_applicable": [
+        "LOGGING",
+        "AUDIT_RIGHTS",
+        "SECURITY"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "MEDIUM",
+      "tags": [
+        "logging",
+        "traceability"
+      ]
     },
     {
-      "obligation_id": "AU-OBL-004",
-      "title": "Record Keeping",
-      "requirement": "Maintain records supporting compliance and auditability (logs, decisions, approvals).",
-      "applies_if": "Regulated or sensitive processing is performed.",
-      "severity_weight": 1.0
+      "obligation_id": "EU-AIA-HUMAN-OVERSIGHT-01",
+      "jurisdiction": "EU",
+      "title": "Human oversight for high-risk AI",
+      "requirement": "Provide measures enabling effective human oversight throughout operation.",
+      "applies_if": "High-risk AI systems.",
+      "clause_types_applicable": [
+        "HUMAN_OVERSIGHT",
+        "GOVERNANCE",
+        "MODEL_RISK"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "HIGH",
+      "tags": [
+        "human_oversight",
+        "controls"
+      ]
+    },
+    {
+      "obligation_id": "EU-AIA-SECURITY-01",
+      "jurisdiction": "EU",
+      "title": "Accuracy, robustness, cybersecurity",
+      "requirement": "Design and develop systems to achieve accuracy, robustness, and cybersecurity appropriate to risk.",
+      "applies_if": "High-risk AI systems (and generally risk-based obligations).",
+      "clause_types_applicable": [
+        "SECURITY",
+        "INCIDENT_RESPONSE",
+        "MODEL_RISK"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "HIGH",
+      "tags": [
+        "cybersecurity",
+        "robustness"
+      ]
+    },
+    {
+      "obligation_id": "AU-PRIVACY-APP-01",
+      "jurisdiction": "AU",
+      "title": "APP transparency and privacy notice",
+      "requirement": "Maintain an up-to-date privacy policy and provide notice of collection and use of personal information.",
+      "applies_if": "Personal information is collected/processed (including via vendors).",
+      "clause_types_applicable": [
+        "PRIVACY_DATA",
+        "NOTICE",
+        "DATA_PROCESSING"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "MEDIUM",
+      "tags": [
+        "privacy",
+        "notice"
+      ]
+    },
+    {
+      "obligation_id": "AU-NDB-01",
+      "jurisdiction": "AU",
+      "title": "Notifiable Data Breaches (NDB) incident notification",
+      "requirement": "Ensure processes to assess and notify eligible data breaches as required under NDB scheme.",
+      "applies_if": "Personal information breach likely to result in serious harm.",
+      "clause_types_applicable": [
+        "INCIDENT_RESPONSE",
+        "SECURITY",
+        "PRIVACY_DATA"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "HIGH",
+      "tags": [
+        "incident",
+        "breach_notification"
+      ]
+    },
+    {
+      "obligation_id": "AU-SEC-ESS8-01",
+      "jurisdiction": "AU",
+      "title": "Baseline security controls (Essential Eight)",
+      "requirement": "Implement baseline security controls (patching, MFA, backups, application control) proportional to risk.",
+      "applies_if": "Systems handling sensitive data or providing critical services.",
+      "clause_types_applicable": [
+        "SECURITY",
+        "ACCESS_CONTROL",
+        "BACKUP_RECOVERY"
+      ],
+      "risk_category": "REGULATORY",
+      "severity_default": "HIGH",
+      "tags": [
+        "security_controls",
+        "essential_eight"
+      ]
     }
   ]
 }

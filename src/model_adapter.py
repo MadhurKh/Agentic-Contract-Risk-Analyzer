@@ -14,6 +14,14 @@ from .schemas import (
 from .feature_extractor import extract_features
 from .scoring import compute_score
 
+def _normalize_source_type(source_type: str) -> str:
+    st = (source_type or "").strip().lower()
+    if st in {"text", "paste"}:
+        return "paste"
+    if st in {"file", "upload", "pdf"}:
+        return "upload"
+    return "paste"
+
 
 def _run_id() -> str:
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
@@ -98,7 +106,7 @@ def analyze_contract(contract_text: str, title: str, source_type: str) -> Analys
 
     return AnalysisResult(
         run_id=rid,
-        contract=ContractMeta(title=title, source_type=source_type, text_length=len(contract_text)),
+        contract=ContractMeta(title=title, source_type=_normalize_source_type(source_type), text_length=len(contract_text)),
         summary=summary,
         findings=findings,
         features=features,

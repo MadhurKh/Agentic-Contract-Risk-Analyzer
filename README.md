@@ -1,52 +1,160 @@
-# GenAI Contract Risk Analyzer (Portfolio Demo)
 
-This project demonstrates how Generative AI can assist legal/procurement teams by reviewing contract text, identifying risk factors and missing protections, and producing **enterprise-style outputs**:
-- Structured risk register (findings + evidence)
-- Extracted feature set (DS handshake layer)
-- Explainable scoring breakdown (severity weights + confidence)
-- Audit log + exportable JSON
+# Agentic Contract Risk Analyzer
 
-> Current implementation is rule-based for portability and transparency, but the repo is structured so a Data Science team can replace internals with an LLM/RAG/model pipeline **without changing the UI**.
+A multi-agent AI system that evaluates contracts against regulatory obligations (EU AI Act, Australian frameworks) using clause extraction, obligation mapping, RAG-based regulatory grounding, verification, and executive scoring.
+
+This project demonstrates how Agentic AI can move beyond prompt-based analysis into structured, auditable, multi-stage reasoning pipelines.
 
 ---
 
-## Demo video
-- 2-minute walkthrough (Google Drive): https://drive.google.com/file/d/12sLuSNMl59imbLOYdIYgVAPFbO6yn9TY/view?usp=drive_link
+## 🚀 What Makes This Different?
 
-## Quick Start (Windows)
+Unlike traditional GenAI contract analyzers that rely on a single LLM pass, this system:
 
-### Prerequisites
-- Python (installed via `py`)
-- Git
+- Uses a 5-Agent Orchestration Pipeline
+- Grounds findings using regulatory PDFs via RAG (TF-IDF index)
+- Filters obligations per clause type (reduces noisy cross-product analysis)
+- Verifies evidence and citations before marking findings as validated
+- Produces an Executive Risk Scorecard
 
-### Setup + Run
-```powershell
-cd "C:\Git\GenAI-Contract-Risk-Analyzer"
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-py -m pip install -r requirements.txt
-py -m streamlit run streamlit_ui\dashboard.py
+---
 
-## Working model with Data Science (DS ↔ Engineering)
+## 🧠 Architecture Overview (5-Agent System)
 
-This repo is structured so Data Science can iterate on modeling without changing the Streamlit UI.
+### 1️⃣ Extractor Agent
+- Splits contract into structured clauses
+- Assigns clause types (SECURITY, PRIVACY_DATA, TRANSPARENCY, etc.)
+- Captures evidence spans
 
-### Interface contract
-- The Streamlit UI calls a single adapter: `src/model_adapter.py::analyze_contract()`
-- The adapter returns a strict output schema: `src/schemas.py::AnalysisResult`
+### 2️⃣ Obligation Mapper Agent
+- Loads curated regulatory obligations (EU AI Act, AU)
+- Each obligation declares `clause_types_applicable`
+- Reduces irrelevant comparisons
 
-### Adapter boundary (why this matters)
-- UI/Orchestration stays stable.
-- DS can swap internals (rules → LLM/RAG → ML) behind the adapter without breaking UI.
+### 3️⃣ Auditor Agent (RAG-powered)
+- Cross-checks clause vs relevant obligations
+- Retrieves regulatory evidence from indexed PDFs
+- Produces grounded findings with citations
 
-### Ownership (RACI)
-- **Data Science owns:** feature definitions, labels, scoring logic, thresholds/calibration, offline evaluation, model/prompt versions
-- **Engineering/Product owns:** UI, schema validation, logging/auditability, configuration, deployment readiness
+### 4️⃣ Verifier Agent
+- Enforces:
+  - Contract evidence present
+  - Regulatory citations present
+  - Confidence threshold
+- Flags findings as NEEDS_REVIEW when grounding is insufficient
 
-### Contracts
-- Data Contract: `docs/data_contract.md`
-- Modeling Contract: `docs/modeling_contract.md`
-- Hiring Manager Pack: `docs/hiring_manager_pack/`
+### 5️⃣ Reviewer Agent
+- Aggregates risk metrics
+- Generates executive-ready Risk Scorecard
+- Produces summary + next steps
 
-### Auditability
-- Output includes version metadata and an audit log for traceability.
+---
+
+## 📂 Project Structure
+
+src/
+  agents/
+    extractor.py
+    obligation_mapper.py
+    auditor.py
+    verifier.py
+    reviewer.py
+  rag/
+    indexer.py
+    retriever.py
+    store.py
+  regulation/
+    obligations_catalog.json
+  orchestrator.py
+  model_adapter.py
+
+streamlit_ui/
+  dashboard.py
+
+data/
+  regulations/
+    eu_ai_act/
+    australia/
+  rag_index/
+
+tests/
+
+---
+
+## 🏗 How to Run
+
+### 1️⃣ Install dependencies
+pip install -r requirements.txt
+
+### 2️⃣ Add Regulatory PDFs
+Place official documents in:
+
+data/regulations/eu_ai_act/
+data/regulations/australia/
+
+### 3️⃣ Build RAG Index
+python scripts/build_reg_index.py
+
+### 4️⃣ Launch UI
+streamlit run streamlit_ui/dashboard.py
+
+Enable:
+- Agentic mode
+- Require regulation citations
+
+---
+
+## 🧪 Testing
+
+Run:
+
+python -m pytest -q
+
+Includes:
+- Applicability filtering test
+- Scoring monotonicity test
+- Evaluation harness
+- Model adapter smoke tests
+
+---
+
+## 📊 Example Output
+
+- Overall Risk Score
+- Risk Level
+- Findings with:
+  - Severity
+  - Confidence
+  - Contract Evidence
+  - Regulatory Citations (page + excerpt)
+- Executive Risk Scorecard
+- Needs Human Review indicator
+
+---
+
+## 🎯 Why This Matters
+
+This project demonstrates:
+
+- Agentic AI system design
+- Deterministic + explainable architecture
+- Regulatory grounding (EU AI Act)
+- Multi-stage reasoning instead of single-pass LLM output
+- Enterprise-ready audit trail design
+
+---
+
+## ⚖️ Disclaimer
+
+This tool is for educational and demonstration purposes.
+It does not constitute legal advice.
+Human legal review is always required.
+
+---
+
+## 👤 Author
+
+Madhur Khandelwal  
+AI Transformation | Agentic AI Systems | Regulatory-Aware AI Design
+
+GitHub: https://github.com/MadhurKh

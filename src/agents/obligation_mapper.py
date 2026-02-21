@@ -1,59 +1,46 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from ._common import AgentResult
 
 
 @dataclass
 class ObligationMapperConfig:
-    """Configuration for obligation mapping."""
-    mode: str = "catalog"  # catalog | stub
+    mode: str = "catalog"
     catalog_path: str = "src/regulation/obligations_catalog.json"
+    clause_types: Optional[List[str]] = None
 
 
-def _load_catalog(path: str) -> Dict[str, List[Dict[str, Any]]]:
+def _load_catalog(path: str) -> Dict[str, Any]:
     p = Path(path)
     if not p.exists():
-        return {}
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+        raise FileNotFoundError(f"Obligations catalog not found: {path}")
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 def run_obligation_mapper(*, jurisdiction: str, config: Optional[ObligationMapperConfig] = None) -> AgentResult:
-    """
-    Agent 2 — Obligation Mapper / Policy Interpreter
-
-    Loads a curated catalog of normalized obligations per jurisdiction.
-    """
+    """Agent 2 — Obligation Mapper (curated local catalog)."""
     cfg = config or ObligationMapperConfig()
-    j = jurisdiction.upper().strip()
+    cat = _load_catalog(cfg.catalog_path)
 
-    catalog = _load_catalog(cfg.catalog_path) if cfg.mode == "catalog" else {}
-    obligations = catalog.get(j, [])
+    juris = (jurisdiction or "").upper().strip()
+    obligations: List[Dict[str, Any]] = []
+    for o in cat.get("obligations", []):
+        if str(o.get("jurisdiction", "")).upper().strip() != juris:
+            continue
+        obligations.append(o)
 
-    if not obligations:
-        # fallback minimal
-        obligations = [
-            {
-                "obligation_id": f"{j}-OBL-001",
-                "jurisdiction": j,
-                "title": "Transparency & Disclosure",
-                "requirement": "Provide appropriate transparency, disclosures, and documentation where required.",
-                "applies_if": "AI/ML systems or automated decisioning is used in service delivery.",
-                "severity_weight": 1.0,
-            }
-        ]
+    if cfg.clause_types:
+        want = {c.upper().strip() for c in cfg.clause_types}
+        filtered: List[Dict[str, Any]] = []
+        for o in obligations:
+            applicable = {str(x).upper().strip() for x in (o.get("clause_types_applicable") or [])}
+            if (not applicable) or (applicable & want):
+                filtered.append(o)
+        obligations = filtered
 
-    # Normalize fields
-    for o in obligations:
-        o["jurisdiction"] = j
-        o.setdefault("severity_weight", 1.0)
-
-    return AgentResult(
-        data={"jurisdiction": j, "obligations": obligations, "mode": cfg.mode},
-        warnings=[] if cfg.mode == "catalog" else ["Obligation mapper running in stub mode."],
-    )
+    return AgentResult(data={"obligations": obligations, "jurisdiction": juris, "mode": cfg.mode})

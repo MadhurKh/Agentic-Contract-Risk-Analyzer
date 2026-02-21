@@ -1,215 +1,124 @@
-import json
-import streamlit as st
-
+import os
 import sys
 from pathlib import Path
+import json
+
+import streamlit as st
+
+# --- Bootstrap: ensure repo root is on sys.path BEFORE importing `src` ---
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.model_adapter import analyze_contract  # noqa: E402
+from src.logger import save_run  # noqa: E402
 
-from src.model_adapter import analyze_contract
-from src.logger import save_run
 
-st.set_page_config(page_title="GenAI Contract Risk Analyzer", layout="wide")
-
-import os
-from pathlib import Path
+st.set_page_config(page_title="Agentic Contract Risk Analyzer", layout="wide")
 
 with st.sidebar:
     st.header("Settings")
-    agentic_on = st.toggle("Agentic mode (5-agent)", value=False)
-    enforce_citations = st.toggle("Require regulation citations", value=True)
-    st.caption("Tip: add regulation PDFs under data/regulations/ and build index.")
+    agentic_on = st.toggle("Agentic mode (5-agent)", value=os.getenv("USE_AGENTIC", "0") == "1")
+    enforce_citations = st.toggle("Require regulation citations", value=os.getenv("REQUIRE_REG_CITATIONS", "1") == "1")
 
-# Set feature flags for this Streamlit session
-if agentic_on:
-    os.environ["USE_AGENTIC"] = "1"
-else:
-    os.environ.pop("USE_AGENTIC", None)
+    if agentic_on:
+        os.environ["USE_AGENTIC"] = "1"
+    else:
+        os.environ.pop("USE_AGENTIC", None)
 
-os.environ["REQUIRE_REG_CITATIONS"] = "1" if enforce_citations else "0"
+    os.environ["REQUIRE_REG_CITATIONS"] = "1" if enforce_citations else "0"
 
-# RAG index status
-rag_path = Path("data/rag_index/reg_index.pkl")
-if rag_path.exists():
-    st.sidebar.success("RAG index found: data/rag_index/reg_index.pkl")
-else:
-    st.sidebar.warning("RAG index not found yet")
+    rag_path = REPO_ROOT / "data" / "rag_index" / "reg_index.pkl"
+    if rag_path.exists():
+        st.success("RAG index found")
+        st.caption(str(rag_path))
+    else:
+        st.warning("RAG index not found yet")
+        st.markdown("---")
+        st.subheader("RAG Setup")
+        st.write("1) Put PDFs in:")
+        st.code("data/regulations/eu_ai_act/\ndata/regulations/australia/", language="text")
+        st.write("2) Build index:")
+        st.code("python scripts/build_reg_index.py", language="bash")
+        st.write("3) Refresh and rerun")
 
+st.title("Agentic Contract Risk Analyzer")
 
-st.title("GenAI Contract Risk Analyzer (Portfolio Demo)")
-st.caption("Enterprise-style outputs: schema contract, evidence, audit log, features, scoring breakdown, and exportable JSON.")
+col1, col2 = st.columns([2, 1])
 
-# --- Layout: Input (left) + Output (right) ---
-left, right = st.columns([1.05, 0.95])
+with col2:
+    title = st.text_input("Document title", value="Uploaded Contract")
+    run = st.button("Analyze", type="primary")
 
-# --------------------
-# LEFT: INPUT
-# --------------------
-with left:
-    st.subheader("1) Provide contract text")
-
-    input_type = st.radio("Input type", ["Paste text", "Upload .txt"], horizontal=True)
-    contract_title = st.text_input("Contract title", value="Sample MSA")
-
+with col1:
+    uploaded = st.file_uploader("Upload contract (.txt) (PDF parsing can be added later)", type=["txt", "pdf"])
     contract_text = ""
-    source_type = "paste"
-
-    if input_type == "Paste text":
-        contract_text = st.text_area("Paste contract here", height=320)
-        source_type = "paste"
-    else:
-        uploaded = st.file_uploader("Upload .txt contract", type=["txt"])
-        if uploaded is not None:
+    if uploaded is not None:
+        if uploaded.name.lower().endswith(".txt"):
             contract_text = uploaded.read().decode("utf-8", errors="ignore")
-            source_type = "upload"
-            st.success("File loaded successfully.")
+        else:
+            st.info("PDF ingestion in UI is not enabled yet. Convert PDF to text or paste text below.")
+    contract_text = st.text_area("Or paste contract text", value=contract_text, height=320)
 
-    run_btn = st.button("Analyze contract", type="primary", disabled=(len(contract_text.strip()) == 0))
+# IMPORTANT: ContractMeta.source_type must be "paste" or "upload" per schema
+source_type = "upload" if uploaded is not None else "paste"
+st.caption(f"Source type: {source_type}")
 
-# --------------------
-# RUN ANALYSIS
-# --------------------
-if run_btn:
-    result_obj = analyze_contract(contract_text, title=contract_title, source_type=source_type)
-    result = result_obj.model_dump()
-    st.session_state["result"] = result
-
-    # Save audit log to /logs
-    save_run(result["run_id"], result)
-
-# --------------------
-# RIGHT: OUTPUT (Render INSIDE right column)
-# --------------------
-with right:
-    st.subheader("2) Output")
-
-    if "result" not in st.session_state:
-        st.info("Run analysis to see results here.")
+if run:
+    if not contract_text.strip():
+        st.error("Please upload or paste contract text.")
     else:
-        data = st.session_state["result"]
+        with st.spinner("Running analysis..."):
+            result = analyze_contract(contract_text=contract_text, title=title, source_type=source_type)
+            try:
+                save_run(result)
+            except Exception:
+                pass
 
-        # Summary metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Overall Risk Score", data["summary"]["overall_risk_score"])
-        m2.metric("Risk Level", data["summary"]["risk_level"])
-        m3.metric("Findings", len(data["findings"]))
+        st.success("Analysis complete")
 
-        st.divider()
+        st.markdown("### Summary")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Overall Risk Score", getattr(result.summary, "overall_risk_score", "NA"))
+        c2.metric("Risk Level", getattr(result.summary, "risk_level", "NA"))
+        c3.metric("Findings", len(getattr(result, "findings", []) or []))
 
-        # Tabs
-        tabs = ["Risk Register", "Evidence", "Features Extracted", "Scoring Logic", "Audit Log", "Data Contract"]
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(tabs)
-
-        with tab1:
-            st.subheader("Risk Register")
-            if len(data["findings"]) == 0:
-                st.warning("No findings returned.")
-            else:
-                for f in data["findings"]:
-                    title = f'{f["finding_id"]} | {f["category"]} | {f["severity"]}'
-                    with st.expander(title, expanded=False):
-                        st.write("**Risk statement:**", f["risk_statement"])
-                        st.write("**Recommendation:**", f["recommendation"])
-                        if f.get("proposed_redline"):
-                            st.write("**Proposed redline:**", f["proposed_redline"])
-                        st.write("**Confidence:**", f["confidence"])
-
-        with tab2:
-            st.subheader("Evidence (No claim without clause snippet)")
-            if len(data["findings"]) == 0:
-                st.info("Run analysis first.")
-            else:
-                ids = [f["finding_id"] for f in data["findings"]]
-                selected = st.selectbox("Select a finding", options=ids)
-
-                finding = next(x for x in data["findings"] if x["finding_id"] == selected)
-                ev = finding.get("evidence", [])
-
-                if not ev:
-                    st.error("Evidence missing — needs review.")
-                else:
-                    for e in ev:
-                        st.write(f'**{e["clause_ref"]}**')
-                        st.code(e["snippet"])
-
-        with tab3:
-            st.subheader("Features Extracted (DS handshake layer)")
-            features = data.get("features", {})
-            feats = features.get("features", [])
-            if not feats:
-                st.info("No features returned.")
-            else:
-                st.dataframe(feats, use_container_width=True)
-
-        with tab4:
-            st.subheader("Scoring Logic (Explainability)")
-            scoring = data.get("scoring", {})
-            if not scoring:
-                st.info("No scoring breakdown returned.")
-            else:
-                st.json(scoring)
-
-        with tab5:
-            st.subheader("Audit Log")
-            st.json(data.get("audit", []))
-
-            st.subheader("Download JSON")
-            st.download_button(
-                label="Download analysis.json",
-                data=json.dumps(data, indent=2),
-                file_name="analysis.json",
-                mime="application/json",
-            )
-
-        with tab6:
-            st.subheader("Data + Model Interface Contract (what engineers care about)")
-            st.markdown(
-                """
-**Input**
-- `contract_text` (string)
-- `title` (string)
-- `source_type` (`paste|upload`)
-
-**Output (strict schema)**
-- `run_id` (string)
-- `summary` (risk score + level + top risks)
-- `findings[]` (structured risk register)
-- `evidence[]` inside each finding (**mandatory**)
-- `features` (DS handshake feature set)
-- `scoring` (explainable breakdown)
-- `audit[]` events
-
-**Evidence rule**
-- No finding is valid unless it has at least one evidence snippet.
-                """
-            )
-
-# --- Agentic scorecard panel (if present in audit) ---
-
-try:
-    if 'result' in locals() and hasattr(result, 'audit') and result.audit:
-        # Find AGENTIC_RUN event
-        sc = None
-        for ev in result.audit:
+        scorecard = None
+        for ev in getattr(result, "audit", []) or []:
             if getattr(ev, "event", "") == "AGENTIC_RUN":
-                sc = (getattr(ev, "details", {}) or {}).get("scorecard")
+                scorecard = (getattr(ev, "details", {}) or {}).get("scorecard")
                 break
-        if sc:
+
+        if scorecard:
             st.markdown("### Executive Risk Scorecard")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Overall Score", sc.get("overall_score", "NA"))
-            c2.metric("Risk Level", sc.get("risk_level", "NA"))
-            counts = sc.get("counts", {})
-            c3.metric("Needs Review", counts.get("needs_review", "NA"))
+            s1, s2, s3 = st.columns(3)
+            s1.metric("Score", scorecard.get("overall_score", "NA"))
+            s2.metric("Level", scorecard.get("risk_level", "NA"))
+            counts = scorecard.get("counts", {})
+            s3.metric("Needs Review", counts.get("needs_review", "NA"))
+
             with st.expander("Top risks", expanded=True):
-                for item in sc.get("top_risks", [])[:5]:
+                for item in scorecard.get("top_risks", [])[:5]:
                     st.write(f"- [{item.get('severity','')}] {item.get('title','')}")
+
             with st.expander("Recommended next steps", expanded=False):
-                for s in sc.get("recommended_next_steps", []):
-                    st.write(f"- {s}")
-            if sc.get("disclaimer"):
-                st.caption(sc["disclaimer"])
-except Exception:
-    pass
+                for step in scorecard.get("recommended_next_steps", []):
+                    st.write(f"- {step}")
+
+            if scorecard.get("disclaimer"):
+                st.caption(scorecard["disclaimer"])
+
+        st.markdown("### Findings")
+        for f in getattr(result, "findings", []) or []:
+            with st.expander(f"[{f.severity}] {f.finding_id}: {f.risk_statement[:120]}"):
+                st.write(f"**Category:** {f.category}")
+                st.write(f"**Confidence:** {f.confidence}")
+                st.write(f"**Recommendation:** {f.recommendation}")
+
+                if getattr(f, "evidence", None):
+                    st.write("**Evidence**")
+                    for e in f.evidence[:6]:
+                        st.code(f"{e.clause_ref}: {e.snippet}", language="text")
+
+        with st.expander("Raw JSON (debug)", expanded=False):
+            st.code(result.model_dump_json(indent=2) if hasattr(result, "model_dump_json") else json.dumps(result.__dict__, indent=2, default=str))

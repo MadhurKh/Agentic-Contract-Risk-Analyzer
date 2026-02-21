@@ -10,16 +10,42 @@ from ..rag.store import RagIndex
 
 @dataclass
 class AuditorConfig:
-    """Configuration for audit agent."""
-    mode: str = "tfidf_rag"   # stub | tfidf_rag
-    top_k: int = 5
+    mode: str = "tfidf_rag"
+    top_k: int = 6
+    min_hits_for_grounded: int = 1
 
 
 def _mk_query(clause: Dict[str, Any], obligation: Dict[str, Any]) -> str:
     return (
-        f"{obligation.get('title','')} {obligation.get('requirement','')} "
-        f"Contract clause: {clause.get('clause_text','')[:600]}"
+        f"Obligation: {obligation.get('title','')} Requirement: {obligation.get('requirement','')} "
+        f"Applies if: {obligation.get('applies_if','')} "
+        f"Contract clause type: {clause.get('clause_type','')} "
+        f"Clause text: {clause.get('clause_text','')[:900]}"
     )
+
+
+def _severity_from(clause: Dict[str, Any], obligation: Dict[str, Any]) -> str:
+    sd = (obligation.get("severity_default") or "").upper().strip()
+    if sd in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+        return sd
+    ct = (clause.get("clause_type") or "").upper()
+    if ct in {"SECURITY", "PRIVACY_DATA", "MODEL_RISK"}:
+        return "HIGH"
+    if ct in {"AUDIT_RIGHTS", "DATA_RETENTION", "HUMAN_OVERSIGHT", "LOGGING"}:
+        return "MEDIUM"
+    return "MEDIUM"
+
+
+def _applicable_obligations_for_clause(clause: Dict[str, Any], obligations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ct = (clause.get("clause_type") or "").upper().strip()
+    if not ct:
+        return obligations
+    out: List[Dict[str, Any]] = []
+    for o in obligations:
+        applicable = [str(x).upper().strip() for x in (o.get("clause_types_applicable") or [])]
+        if not applicable or ct in applicable:
+            out.append(o)
+    return out
 
 
 def run_auditor(
@@ -29,41 +55,55 @@ def run_auditor(
     rag_index: Optional[RagIndex] = None,
     config: Optional[AuditorConfig] = None,
 ) -> AgentResult:
-    """
-    Agent 3 — Auditor (RAG)
-
-    Deterministic TF-IDF RAG version:
-    - retrieves top_k regulatory chunks per obligation+clause query
-    - creates findings with citations referencing retrieved chunks
-
-    NOTE: Gap statement is still template-based (no LLM yet).
-    """
-    config = config or AuditorConfig()
-
+    """Agent 3 — Auditor: filters obligations per clause to reduce noise."""
+    cfg = config or AuditorConfig()
     findings: List[Dict[str, Any]] = []
-    if not clauses:
-        return AgentResult(data={"findings": [], "mode": config.mode}, warnings=["No clauses to audit."])
+    warnings: List[str] = []
 
-    for clause in clauses[:10]:
-        for obl in obligations:
+    if not clauses:
+        return AgentResult(data={"findings": [], "mode": cfg.mode}, warnings=["No clauses to audit."])
+
+    if rag_index is None:
+        warnings.append("RAG index not provided; regulatory citations will be missing.")
+
+    for clause in clauses[:20]:
+        applicable_obls = _applicable_obligations_for_clause(clause, obligations)
+        if not applicable_obls:
+            continue
+
+        for obl in applicable_obls:
+            juris = str(obl.get("jurisdiction", "")).upper().strip()
             reg_cits: List[Dict[str, Any]] = []
+
             if rag_index is not None:
-                q = _mk_query(clause, obl)
-                hits = retrieve(query=q, index=rag_index, top_k=config.top_k)
+                hits = retrieve(
+                    query=_mk_query(clause, obl),
+                    index=rag_index,
+                    top_k=cfg.top_k,
+                    filters={"jurisdiction": juris} if juris else None,
+                )
                 for h in hits:
                     reg_cits.append({
                         "doc_id": h.doc_id,
                         "chunk_id": h.chunk_id,
                         "page": h.meta.get("page"),
                         "title": h.meta.get("title"),
-                        "text": h.text[:800],
+                        "text": h.text[:900],
                     })
 
             gap = (
-                f"Clause may not fully address obligation '{obl.get('title','')}'. "
-                f"Check for explicit commitments aligned to regulatory requirements."
+                f"Potential gap vs obligation '{obl.get('title','')}' ({juris}). "
+                f"Verify the clause includes explicit commitments matching the requirement."
             )
-            conf = 0.55 if reg_cits else 0.35
+
+            sev = _severity_from(clause, obl)
+            status = "DRAFT"
+            confidence = 0.35
+
+            if reg_cits and len(reg_cits) >= cfg.min_hits_for_grounded:
+                confidence = 0.60
+            else:
+                status = "NEEDS_REVIEW"
 
             findings.append({
                 "finding_id": f"F-{clause.get('clause_id','CL')}-{obl.get('obligation_id','OBL')}",
@@ -71,14 +111,13 @@ def run_auditor(
                 "obligation_id": obl.get("obligation_id", "UNKNOWN"),
                 "gap_statement": gap,
                 "risk_category": "REGULATORY",
-                "severity": "MEDIUM",
-                "confidence": conf,
+                "severity": sev,
+                "confidence": confidence,
                 "contract_evidence": clause.get("evidence_spans", []) or [],
                 "reg_citations": reg_cits,
-                "status": "DRAFT",
+                "status": status,
+                "jurisdiction": juris,
+                "tags": obl.get("tags", []),
             })
 
-    warn = []
-    if rag_index is None:
-        warn.append("RAG index not provided; citations will be missing.")
-    return AgentResult(data={"findings": findings, "mode": config.mode}, warnings=warn)
+    return AgentResult(data={"findings": findings, "mode": cfg.mode}, warnings=warnings)
