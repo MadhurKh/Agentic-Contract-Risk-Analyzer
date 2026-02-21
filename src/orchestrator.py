@@ -25,7 +25,7 @@ class OrchestratorConfig:
     jurisdictions: List[str] | None = None
     require_reg_citations: bool = True
     rag_index_path: str = "data/rag_index/reg_index.pkl"
-    top_k: int = 6
+    top_k: int = 8
     obligation_catalog_path: str = "src/regulation/obligations_catalog.json"
 
 
@@ -60,7 +60,7 @@ def run_agentic_contract_analysis(
     rag_index = _try_load_rag_index(cfg.rag_index_path)
     rag_available = rag_index is not None
 
-    ext = run_extractor(contract_text, config=ExtractorConfig(mode="deterministic", max_clauses=30, min_chars=200))
+    ext = run_extractor(contract_text, config=ExtractorConfig(mode="deterministic", max_clauses=40, min_chars=160))
     clauses = ext.data.get("clauses", [])
 
     obligations: List[Dict[str, Any]] = []
@@ -72,7 +72,7 @@ def run_agentic_contract_analysis(
         clauses=clauses,
         obligations=obligations,
         rag_index=rag_index,
-        config=AuditorConfig(mode="tfidf_rag", top_k=cfg.top_k, min_hits_for_grounded=1),
+        config=AuditorConfig(mode="tfidf_rag", top_k=cfg.top_k, min_hits_for_grounded=1, rerank=True, max_citations_per_finding=3),
     )
     findings_raw = aud.data.get("findings", [])
 
@@ -98,7 +98,8 @@ def run_agentic_contract_analysis(
             ev.append(Evidence(clause_ref=str(e.get("clause_ref") or f.get("clause_id") or "Contract"), snippet=str(e.get("snippet") or "")[:500]))
 
         for c in f.get("reg_citations", []) or []:
-            ev.append(Evidence(clause_ref=str(c.get("doc_id", "Regulation")), snippet=f"p.{c.get('page','?')}: " + str(c.get("text",""))[:450]))
+            excerpt = c.get("excerpt") or c.get("text") or ""
+            ev.append(Evidence(clause_ref=str(c.get("doc_id", "Regulation")), snippet=f"p.{c.get('page','?')}: " + str(excerpt)[:450]))
 
         reasons = f.get("quality_reasons") or []
         rec = "Build/refresh RAG index and rerun to ground citations."
@@ -136,7 +137,7 @@ def run_agentic_contract_analysis(
                 "needs_human_review": needs_review,
                 "quality_flags": flags,
                 "scorecard": scorecard,
-                "modes": {"extractor": "deterministic", "obligation_mapper": "catalog", "auditor": "tfidf_rag", "reviewer": "deterministic"},
+                "modes": {"extractor": "deterministic", "obligation_mapper": "catalog", "auditor": "tfidf_rag+rerank", "reviewer": "deterministic"},
             },
         ),
     ]

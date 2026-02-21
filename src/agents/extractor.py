@@ -1,136 +1,157 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-import re
 
 from ._common import AgentResult
 
 
 @dataclass
 class ExtractorConfig:
-    """Configuration for clause extraction."""
-    mode: str = "deterministic"  # deterministic | llm | hybrid
-    max_clauses: int = 30
-    min_chars: int = 200
+    mode: str = "deterministic"
+    max_clauses: int = 40
+    # Lowered to avoid dropping legitimate short clauses (common in contracts)
+    min_chars: int = 80
 
 
-_SECTION_RE = re.compile(r"^(\s*(?:section\s+)?\d+(?:\.\d+)*\s*[:\-\)]\s+.+)$", re.IGNORECASE)
-_HEADING_RE = re.compile(r"^\s*[A-Z][A-Z\s\-]{4,}$")
-_BULLET_RE = re.compile(r"^\s*(?:\-|\*|\u2022)\s+")
+_HEADING_RE = re.compile(r"^(\s*)([A-Z][A-Z\s\-\&]{6,})(:)?\s*$")
+_CLAUSE_NUM_RE = re.compile(r"^(\s*)(\d+(?:\.\d+){0,4})(\)|\.|\s)\s+(.*)$")
+
+_TYPE_RULES: List[Tuple[str, List[str]]] = [
+    ("SECURITY", ["security", "cyber", "encryption", "encrypt", "vulnerability", "patch", "mfa", "multi-factor", "access control", "secure", "penetration", "soc 2", "iso 27001"]),
+    ("PRIVACY_DATA", ["personal data", "pii", "privacy", "gdpr", "data subject", "controller", "processor", "anonym", "pseudonym", "confidential information"]),
+    ("DATA_PROCESSING", ["process data", "data processing", "sub-processor", "subprocessor", "processing activities", "data transfer", "cross-border", "third country"]),
+    ("NOTICE", ["notice", "notify", "disclose", "transparency", "inform", "user notice"]),
+    ("TRANSPARENCY", ["transparency", "explain", "explanation", "ai system", "automated decision", "model output", "disclose ai"]),
+    ("LOGGING", ["log", "logging", "audit log", "trace", "traceability", "record-keeping", "record keeping"]),
+    ("AUDIT_RIGHTS", ["audit", "inspection", "access to records", "right to audit", "verify compliance"]),
+    ("HUMAN_OVERSIGHT", ["human oversight", "human in the loop", "manual review", "override", "escalation", "supervision"]),
+    ("INCIDENT_RESPONSE", ["incident", "breach", "notifiable", "ndb", "notify authority", "security incident", "response plan"]),
+    ("DATA_RETENTION", ["retention", "retain", "deletion", "delete", "destroy", "storage limitation", "archiv"]),
+    ("ACCESS_CONTROL", ["access control", "least privilege", "role based", "rbac", "authentication", "authorization"]),
+    ("BACKUP_RECOVERY", ["backup", "disaster recovery", "business continuity", "restore", "rto", "rpo"]),
+    ("MODEL_RISK", ["model risk", "bias", "fairness", "drift", "monitoring", "robustness", "accuracy", "testing", "validation"]),
+    ("GOVERNANCE", ["governance", "policy", "compliance", "controls", "risk management", "responsibility", "accountability"]),
+]
 
 
-def _guess_clause_type(text: str) -> str:
-    t = (text or "").lower()
-    # Order matters: pick most specific first
-    rules = [
-        ("DATA_RETENTION", ["retention", "retain", "deletion", "delete", "purge"]),
-        ("PRIVACY_DATA", ["personal data", "pii", "gdpr", "privacy", "data protection"]),
-        ("SECURITY", ["security", "encryption", "iso 27001", "access control", "incident", "breach"]),
-        ("AUDIT_RIGHTS", ["audit", "inspection", "right to audit", "assurance"]),
-        ("SUBPROCESSORS", ["subprocessor", "sub-contract", "third party", "affiliate", "vendors"]),
-        ("LIABILITY", ["liability", "indemn", "limitation", "cap", "damages"]),
-        ("GOVERNANCE", ["governance", "policy", "controls", "compliance", "monitoring"]),
-        ("TRANSPARENCY", ["transparency", "disclosure", "explain", "notice"]),
-        ("HUMAN_OVERSIGHT", ["human oversight", "human review", "manual review", "escalation"]),
-        ("LOGGING", ["logging", "logs", "trace", "audit trail"]),
-        ("MODEL_RISK", ["model", "ai", "machine learning", "algorithm", "automated decision"]),
-        ("IP", ["intellectual property", "ip", "ownership", "license"]),
-        ("TERMINATION", ["termination", "terminate", "exit", "wind down"]),
-    ]
-    for label, kws in rules:
-        if any(k in t for k in kws):
-            return label
-    return "GENERAL"
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip().lower()
 
 
-def _split_into_sections(text: str) -> List[Tuple[str, str]]:
-    """Returns list of (heading, body)."""
+def _segment_contract(text: str) -> List[Dict[str, Any]]:
     lines = (text or "").splitlines()
-    sections: List[Tuple[str, List[str]]] = []
-    cur_h = "Preamble"
-    cur_body: List[str] = []
+    blocks: List[Dict[str, Any]] = []
+
+    current_heading: Optional[str] = None
+    current_num: Optional[str] = None
+    buf: List[str] = []
 
     def flush():
-        nonlocal cur_h, cur_body
-        body = "\n".join(cur_body).strip()
-        if body:
-            sections.append((cur_h.strip()[:120], body))
-        cur_body = []
+        nonlocal buf, current_num, current_heading
+        if not buf:
+            return
+        clause_text = "\n".join(buf).strip()
+        if clause_text:
+            blocks.append({"heading": current_heading, "clause_num": current_num, "text": clause_text})
+        buf = []
 
-    for line in lines:
-        raw = line.rstrip()
-        if not raw.strip():
-            cur_body.append(raw)
+    for ln in lines:
+        if not ln.strip():
+            if buf:
+                buf.append("")
             continue
 
-        is_section = bool(_SECTION_RE.match(raw)) or bool(_HEADING_RE.match(raw))
-        if is_section and len(cur_body) >= 3:
+        h = _HEADING_RE.match(ln)
+        if h:
             flush()
-            cur_h = raw.strip()
+            current_heading = h.group(2).strip()
+            current_num = None
             continue
 
-        cur_body.append(raw)
+        m = _CLAUSE_NUM_RE.match(ln)
+        if m:
+            flush()
+            current_num = m.group(2)
+            buf.append(m.group(4))
+            continue
+
+        buf.append(ln)
 
     flush()
-    return [(h, b) for h, b in sections if b.strip()]
+    return blocks
 
 
-def run_extractor(contract_text: str, *, config: Optional[ExtractorConfig] = None) -> AgentResult:
-    """
-    Agent 1 — Extractor (deterministic MVP)
+def _classify_clause(text: str, heading: Optional[str] = None) -> Tuple[str, float, float]:
+    t = _normalize(text)
+    h = _normalize(heading or "")
+    combined = (h + " " + t).strip()
 
-    - Splits contract into sections using simple heading heuristics
-    - Creates clause objects with evidence spans/snippets
-    - Assigns a coarse clause_type via keyword rules
-    """
+    best_type = "GOVERNANCE"
+    best_score = 0.0
+
+    for clause_type, keywords in _TYPE_RULES:
+        score = 0
+        for kw in keywords:
+            if kw in combined:
+                score += 1
+        if score > best_score:
+            best_score = float(score)
+            best_type = clause_type
+
+    if best_score >= 4:
+        conf = 0.85
+    elif best_score == 3:
+        conf = 0.75
+    elif best_score == 2:
+        conf = 0.65
+    elif best_score == 1:
+        conf = 0.55
+    else:
+        conf = 0.40
+
+    return best_type, conf, best_score
+
+
+def _evidence_span(clause_id: str, clause_text: str) -> Dict[str, str]:
+    snippet = _normalize(clause_text)[:220]
+    return {"clause_ref": clause_id, "snippet": snippet}
+
+
+def run_extractor(contract_text: str, config: Optional[ExtractorConfig] = None) -> AgentResult:
     cfg = config or ExtractorConfig()
 
-    text = contract_text or ""
-    if not text.strip():
-        return AgentResult(data={"clauses": [], "extractor_mode": cfg.mode}, warnings=["Empty contract text."])
-
-    sections = _split_into_sections(text)
-
+    blocks = _segment_contract(contract_text)
     clauses: List[Dict[str, Any]] = []
-    offset = 0
-    for i, (heading, body) in enumerate(sections[: cfg.max_clauses], start=1):
-        clause_text = f"{heading}\n{body}".strip()
-        if len(clause_text) < cfg.min_chars and i != 1:
+
+    for i, b in enumerate(blocks):
+        text = (b.get("text") or "").strip()
+        heading = b.get("heading")
+        clause_type, conf, score = _classify_clause(text, heading)
+
+        # allow shorter clauses if we have strong classification signal
+        if len(text) < cfg.min_chars and score < 2:
             continue
 
-        # Locate clause text in full string (best-effort)
-        idx = text.find(body, offset)
-        if idx == -1:
-            idx = text.find(body)
-        start = max(0, idx if idx != -1 else offset)
-        end = min(len(text), start + min(len(clause_text), 1200))
-        snippet = text[start:end]
+        clause_id = b.get("clause_num") or f"CL-{i+1:03d}"
 
         clauses.append(
             {
-                "clause_id": f"CL-{i:04d}",
-                "clause_type": _guess_clause_type(clause_text),
-                "clause_text": clause_text,
-                "evidence_spans": [{"start": start, "end": end, "snippet": snippet}],
-                "confidence": 0.70,
+                "clause_id": clause_id,
+                "section_heading": heading,
+                "clause_type": clause_type,
+                "clause_confidence": conf,
+                "clause_text": text,
+                "evidence_spans": [_evidence_span(clause_id, text)],
             }
         )
-        offset = end
 
+        if len(clauses) >= cfg.max_clauses:
+            break
+
+    warnings: List[str] = []
     if not clauses:
-        # fallback: whole text
-        clauses = [
-            {
-                "clause_id": "CL-0001",
-                "clause_type": "FULL_TEXT",
-                "clause_text": text,
-                "evidence_spans": [{"start": 0, "end": min(len(text), 1200), "snippet": text[:1200]}],
-                "confidence": 0.55,
-            }
-        ]
+        warnings.append("No clauses extracted (contract may be too short or formatting not recognized).")
 
-    return AgentResult(
-        data={"clauses": clauses, "extractor_mode": cfg.mode},
-        warnings=["Extractor uses heuristic section splitting (deterministic MVP)."],
-    )
+    return AgentResult(data={"clauses": clauses, "mode": cfg.mode}, warnings=warnings)
