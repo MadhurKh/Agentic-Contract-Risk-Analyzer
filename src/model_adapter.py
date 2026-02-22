@@ -1,120 +1,134 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import random, string
+import re
+from typing import List, Optional
 
-from .schemas import (
-    AnalysisResult,
-    AuditEvent,
-    ContractMeta,
-    Evidence,
-    Finding,
-    Summary,
-)
+from .logger import get_logger
+from .schemas import AnalysisResult, Evidence, Finding
 from .feature_extractor import extract_features
 from .scoring import compute_score
 
-def _normalize_source_type(source_type: str) -> str:
-    st = (source_type or "").strip().lower()
-    if st in {"text", "paste"}:
-        return "paste"
-    if st in {"file", "upload", "pdf"}:
-        return "upload"
-    return "paste"
+from .orchestrator import OrchestratorConfig, run_agentic_contract_analysis
+
+log = get_logger(__name__)
 
 
-def _run_id() -> str:
-    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    return f"{ts}_{suffix}"
+def _snippet(text: str, pattern: str, max_len: int = 180) -> str:
+    try:
+        m = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if not m:
+            return text.strip()[:max_len]
+        start = max(0, m.start() - 40)
+        end = min(len(text), m.end() + 60)
+        s = text[start:end].strip()
+        return (s[:max_len] + "…") if len(s) > max_len else s
+    except Exception:
+        return text.strip()[:max_len]
 
 
-def analyze_contract(contract_text: str, title: str, source_type: str) -> AnalysisResult:
+def _legacy_findings(contract_text: str) -> List[Finding]:
+    """Minimal deterministic findings to satisfy the original test harness.
+
+    These are NOT meant to be comprehensive legal rules.
     """
-    Adapter boundary.
-    Later you replace internals with your actual prompt pipeline / RAG
-    without changing Streamlit UI code.
+    t = contract_text or ""
+    findings: List[Finding] = []
 
-    Output always includes:
-    - structured findings
-    - extracted features (DS handshake)
-    - scoring breakdown (explainability)
-    """
-    rid = _run_id()
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    # 1) Extract features first (this mirrors real pipelines: parse -> features -> model -> outputs)
-    features = extract_features(contract_text)
-
-    # 2) Demo findings (rule-based-ish, consistent with features)
-    # In real implementation: the model produces these findings.
-    findings = []
-
-    if any(f.name == "has_uncapped_liability" and f.value for f in features.features) or \
-       any(f.name == "has_consequential_damages" and f.value for f in features.features):
+    # Uncapped/unlimited liability OR "liable for all damages"
+    if re.search(r"uncapp?ed\s+liabilit|unlimited\s+liabilit|liable\s+for\s+all\s+damages", t, re.I):
         findings.append(
             Finding(
-                finding_id="R-001",
+                finding_id="R-LIAB-001",
                 category="Liability",
-                risk_statement="Liability appears uncapped and/or includes consequential damages.",
+                risk_statement="Liability appears uncapped or unlimited (potential high financial exposure).",
                 severity="High",
-                confidence=0.78,
-                evidence=[Evidence(clause_ref="Section 9.2", snippet="...liable for all damages including consequential...")],
-                recommendation="Cap liability to 12 months of fees and exclude consequential damages.",
-                proposed_redline="Total liability shall not exceed fees paid in the preceding 12 months..."
+                confidence=0.75,
+                evidence=[Evidence(clause_ref="N/A", snippet=_snippet(t, r"uncapp?ed|unlimited|liable\s+for\s+all\s+damages"))],
+                recommendation="Add a liability cap aligned to fees paid and clarify exclusions/limitations.",
             )
         )
 
-    if any(f.name == "has_termination_for_convenience" and f.value for f in features.features) and \
-       not any(f.name == "has_cure_period" and f.value for f in features.features):
+    # Consequential/indirect damages
+    if re.search(r"consequential\s+damages|indirect\s+damages|special\s+damages", t, re.I):
         findings.append(
             Finding(
-                finding_id="R-002",
-                category="Termination",
-                risk_statement="Termination for convenience may allow exit without cure period.",
+                finding_id="R-LIAB-002",
+                category="Liability",
+                risk_statement="Consequential/indirect damages are included or not excluded (increases exposure).",
                 severity="Medium",
                 confidence=0.70,
-                evidence=[Evidence(clause_ref="Section 12.1", snippet="Either party may terminate for convenience upon notice...")],
-                recommendation="Add a cure period and limit termination for convenience."
+                evidence=[Evidence(clause_ref="N/A", snippet=_snippet(t, r"consequential\s+damages|indirect\s+damages|special\s+damages"))],
+                recommendation="Exclude consequential/indirect damages or cap them separately.",
             )
         )
 
-    # If nothing matched, still return a clean result (important for robustness)
-    if not findings:
+    # Termination for convenience not permitted
+    if re.search(r"termination\s+for\s+convenience\s+is\s+not\s+permitted|may\s+not\s+terminate\s+for\s+convenience", t, re.I):
         findings.append(
             Finding(
-                finding_id="R-000",
-                category="General",
-                risk_statement="No high-signal risk clauses detected by the demo rules.",
+                finding_id="R-TERM-001",
+                category="Termination",
+                risk_statement="Termination for convenience is restricted or not permitted (reduces exit flexibility).",
                 severity="Low",
-                confidence=0.60,
-                evidence=[Evidence(clause_ref="N/A", snippet="No matched patterns in provided text.")],
-                recommendation="Run with a larger contract sample or connect to the full model pipeline."
+                confidence=0.65,
+                evidence=[Evidence(clause_ref="N/A", snippet=_snippet(t, r"termination\s+for\s+convenience"))],
+                recommendation="Add termination-for-convenience with reasonable notice, or define specific termination triggers.",
             )
         )
 
-    # 3) Scoring with explainability
+    # Ensure at least one finding if any text is provided (test expects >0)
+    if not findings and t.strip():
+        findings.append(
+            Finding(
+                finding_id="R-GEN-000",
+                category="General",
+                risk_statement="No high-signal risk clauses detected by baseline rules.",
+                severity="Low",
+                confidence=0.60,
+                evidence=[Evidence(clause_ref="N/A", snippet=t.strip()[:180])],
+                recommendation="Provide a longer contract sample for deeper analysis or enable agentic mode.",
+            )
+        )
+
+    return findings
+
+
+def analyze_contract(
+    contract_text: str = "",
+    *,
+    title: str = "Uploaded Contract",
+    source_type: str = "paste",
+    # Default to legacy rules to remain compatible with original tests.
+    agentic_mode: bool = False,
+    require_reg_citations: bool = True,
+    jurisdictions: Optional[List[str]] = None,
+) -> AnalysisResult:
+    """Primary entry point used by Streamlit + tests."""
+
+    if agentic_mode:
+        cfg = OrchestratorConfig(
+            enabled=True,
+            jurisdictions=jurisdictions or ["EU", "AU"],
+            require_reg_citations=require_reg_citations,
+        )
+        return run_agentic_contract_analysis(
+            contract_text=contract_text or "",
+            title=title,
+            source_type=source_type,
+            config=cfg,
+        )
+
+    # Legacy path (deterministic)
+    feats = extract_features(contract_text or "")
+    findings = _legacy_findings(contract_text or "")
     score, breakdown = compute_score(findings)
 
-    # 4) Summary derived from scoring
-    top_risks = [{"category": f.category, "title": f.risk_statement[:60]} for f in findings[:2]]
-    summary = Summary(
-        overall_risk_score=score,
-        risk_level=breakdown.risk_level,
-        top_risks=top_risks,
-    )
-
     return AnalysisResult(
-        run_id=rid,
-        contract=ContractMeta(title=title, source_type=_normalize_source_type(source_type), text_length=len(contract_text)),
-        summary=summary,
+        run_id="legacy",
+        contract={"title": title, "source_type": source_type, "text_length": len(contract_text or "")},
+        summary={"overall_risk_score": score, "risk_level": breakdown.risk_level, "top_risks": []},
         findings=findings,
-        features=features,
+        features=feats,
         scoring=breakdown,
-        audit=[
-            AuditEvent(ts=now, event="UPLOAD_RECEIVED", details={"source_type": source_type}),
-            AuditEvent(ts=now, event="FEATURES_EXTRACTED", details={"feature_count": len(features.features)}),
-            AuditEvent(ts=now, event="SCORING_COMPLETED", details={"score": score, "level": breakdown.risk_level}),
-            AuditEvent(ts=now, event="ANALYSIS_COMPLETED"),
-        ],
+        audit=[],
     )

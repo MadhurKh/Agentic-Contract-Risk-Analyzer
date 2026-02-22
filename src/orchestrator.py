@@ -82,10 +82,11 @@ def run_agentic_contract_analysis(
     )
     verified = ver.data.get("verified_findings", [])
     flags = ver.data.get("quality_flags", [])
+    reason_counts = ver.data.get("reason_counts", {})
     needs_review = bool(ver.data.get("needs_human_review", False)) or (cfg.require_reg_citations and not rag_available)
 
     rev = run_reviewer(verified_findings=verified, config=ReviewerConfig(mode="deterministic"))
-    scorecard = rev.data.get("risk_scorecard", {})
+    scorecard = rev.data.get("risk_scorecard", {}) or {}
 
     mapped_findings: List[Finding] = []
     for f in verified:
@@ -122,8 +123,41 @@ def run_agentic_contract_analysis(
         )
 
     score, breakdown = compute_score(mapped_findings)
+
+    # --- Single source of truth for "what the user sees" ---
+    # Align the executive scorecard + headline summary to the same score/risk-level so the UI never contradicts itself.
+    verified_count = sum(1 for f in verified if (f.get("status") == "VERIFIED"))
+    needs_review_count = sum(1 for f in verified if (f.get("status") == "NEEDS_REVIEW"))
+
+    # Normalize scorecard keys so any UI renderer can find them
+    scorecard = dict(scorecard) if isinstance(scorecard, dict) else {}
+    scorecard["risk_level"] = breakdown.risk_level
+    scorecard["score"] = float(score)
+    scorecard["overall_score"] = float(score)
+    scorecard["overall_score_0_100"] = float(score)
+    scorecard["verified_count"] = int(verified_count)
+    scorecard["needs_review_count"] = int(needs_review_count)
+    scorecard["reason_counts"] = reason_counts
+
+    # Make the "why needs review" visible even if UI doesn't have a dedicated widget
+    if needs_review_count:
+        breakdown_lines = []
+        if reason_counts.get("MISSING_REG_CITATIONS"):
+            breakdown_lines.append(f"Missing regulation citations: {reason_counts.get('MISSING_REG_CITATIONS')}")
+        if reason_counts.get("MISSING_CONTRACT_EVIDENCE"):
+            breakdown_lines.append(f"Missing contract evidence: {reason_counts.get('MISSING_CONTRACT_EVIDENCE')}")
+        if reason_counts.get("LOW_CONFIDENCE"):
+            breakdown_lines.append(f"Low confidence: {reason_counts.get('LOW_CONFIDENCE')}")
+        if breakdown_lines:
+            msg = "Needs review breakdown — " + "; ".join(breakdown_lines)
+            nxt = scorecard.get("recommended_next_steps") or []
+            if isinstance(nxt, list):
+                scorecard["recommended_next_steps"] = [msg] + nxt
+            else:
+                scorecard["recommended_next_steps"] = [msg]
+
     top_risks = [{"category": f.category, "title": f.risk_statement[:60]} for f in mapped_findings[:3]]
-    summary = Summary(overall_risk_score=score, risk_level=breakdown.risk_level, top_risks=top_risks)
+    summary = Summary(overall_risk_score=int(round(score)), risk_level=breakdown.risk_level, top_risks=top_risks)
 
     audit_events = [
         AuditEvent(ts=now, event="UPLOAD_RECEIVED", details={"source_type": source_type, "title": title}),

@@ -1,0 +1,77 @@
+MASTER SERVICES AGREEMENT (EXCERPT) — AI-ENABLED SERVICES
+Effective Date: 01 Jan 2026
+
+1. DEFINITIONS
+1.1 “Services” means the AI-enabled analytics and automation services, including optional machine-learning components.
+1.2 “Customer Data” means all data provided by Customer, including Personal Data.
+1.3 “AI System” means any model, algorithm, or automated decision component used to generate outputs.
+
+2. SCOPE OF SERVICES
+2.1 Provider will deliver Services described in Statement(s) of Work.
+2.2 Provider may use subcontractors for parts of the Services.
+
+3. DATA PROCESSING & PRIVACY
+3.1 Provider shall process Customer Data solely to provide the Services.
+3.2 Provider will comply with all applicable privacy laws.
+3.3 Provider may transfer Customer Data to other jurisdictions where it maintains facilities.
+3.4 Provider will assist Customer with data subject requests upon request within a reasonable time.
+3.5 Data retention: Provider will retain Customer Data for 5 years after termination for “business purposes” unless prohibited.
+
+4. SECURITY
+4.1 Provider will implement commercially reasonable security measures.
+4.2 Provider may update security measures at its discretion.
+4.3 Provider will encrypt data in transit; encryption at rest will be used where feasible.
+4.4 Access to Customer Data will be granted to Provider personnel on a need-to-know basis.
+4.5 Provider is not required to meet any specific standard (e.g., ISO 27001) unless agreed in a SOW.
+
+5. INCIDENT NOTIFICATION
+5.1 Provider will notify Customer of a confirmed security incident “promptly” after discovery.
+5.2 Provider will provide reasonable cooperation; details may be limited due to legal restrictions.
+5.3 Provider will not notify regulators unless required by law.
+
+6. AUDIT & INSPECTION
+6.1 Customer may request evidence of Provider’s security controls once per year.
+6.2 Provider may refuse audit requests that it deems unreasonable or disruptive.
+6.3 On-site audits are not permitted; only written responses will be provided.
+
+7. LOGGING & TRACEABILITY
+7.1 Provider will maintain system logs appropriate to its operations.
+7.2 Provider may delete logs at any time unless required for investigations.
+7.3 Provider does not warrant retention of logs beyond 30 days.
+
+8. HUMAN OVERSIGHT & ESCALATION
+8.1 Provider may use automated decision-making to optimize outcomes.
+8.2 Customer may request manual review for material decisions; Provider will consider the request.
+8.3 Provider retains discretion to determine whether a manual review is necessary.
+
+9. TRANSPARENCY
+9.1 Provider will provide general documentation describing the Services.
+9.2 Provider is not obligated to disclose model architectures, training data, or detailed explanations for outputs.
+9.3 Provider may label outputs as “AI-generated” where appropriate.
+
+10. MODEL GOVERNANCE, QUALITY, AND MONITORING
+10.1 Provider will use reasonable efforts to test models before deployment.
+10.2 Provider may change models at any time to improve performance.
+10.3 Provider does not commit to any specific accuracy or robustness thresholds.
+10.4 Provider will monitor performance periodically.
+
+11. SUBPROCESSORS
+11.1 Provider may engage subprocessors to process Customer Data.
+11.2 Provider will maintain a list of subprocessors upon request.
+11.3 Provider may add new subprocessors without prior notice.
+
+12. TERM AND TERMINATION
+12.1 Either party may terminate for convenience with 30 days’ notice.
+12.2 Upon termination, Provider will delete Customer Data within 180 days, except where retention is required under Section 3.5.
+
+13. LIABILITY
+13.1 Provider’s total liability is capped at fees paid in the prior 3 months.
+13.2 Provider is not liable for indirect or consequential damages.
+
+14. COMPLIANCE & REGULATORY
+14.1 Each party will comply with laws applicable to it.
+14.2 Customer is responsible for determining whether the Services are suitable for any high-risk use case.
+14.3 Provider will support reasonable compliance requests if mutually agreed.
+
+15. GOVERNING LAW
+15.1 This Agreement is governed by the laws of England and Wales.

@@ -1,14 +1,25 @@
-# Fix: extractor dropped short clauses (min_chars too high)
+# Patch: Fix executive score blank + reduce noisy findings (Covered/Partial/Gap) + dedupe
 
-Root cause:
-- Default ExtractorConfig.min_chars=160 filtered out common short contract clauses.
-- Unit test used short sample clauses, so extractor returned 0 clauses.
+## Symptoms addressed
+1) Executive scorecard score shown blank in UI:
+   - UI versions differ; some expect `score` or `overall_score`.
+   - Reviewer now returns multiple aliases: `score`, `overall_score`, and canonical `overall_score_0_100`.
 
-Fix:
-- Lowered default min_chars to 80
-- Added heuristic: allow short clauses if keyword classification signal is strong (>=2 hits)
-- Updated test to explicitly pass ExtractorConfig(min_chars=1) for robustness
+2) Findings were repetitive and almost all "Potential gap":
+   - Auditor now classifies each obligation vs clause as:
+     - COVERED (suppressed; no finding)
+     - PARTIAL (finding with downshifted severity)
+     - GAP (finding)
+   - Deterministic lexical overlap heuristic; no LLM required.
 
-Expected impact:
-- More clauses extracted from real contracts
-- Better applicability filtering due to more typed clauses
+3) 23+ duplicates:
+   - Dedupe findings by (jurisdiction, obligation_id), keeping the highest severity/confidence/grounding instance.
+   - Adds `related_clause_ids` to preserve traceability.
+
+## Files changed
+- src/agents/reviewer.py
+- src/agents/auditor.py
+
+## Run
+- python -m pytest -q
+- streamlit run streamlit_ui/dashboard.py
