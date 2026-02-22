@@ -1,21 +1,36 @@
-# DS ↔ Engineering Handshake (How I collaborate with Data Science)
+# DS ↔ Engineering Collaboration Pattern
 
-## Stable interface
-- UI calls a single adapter: `analyze_contract(contract_text, title, source_type)`
-- Adapter returns a strict schema: `AnalysisResult` (Pydantic)
+## Stable Interface
 
-## Feature-first pipeline
-1) Parse → extract features (`src/feature_extractor.py`)
-2) Generate findings (rules/LLM/ML)
-3) Compute score + explainability (`src/scoring.py`)
-4) Return schema-valid result + audit log
+UI calls one function:
 
-## Explainable scoring (DS-tunable)
-- Severity weights and aggregation
-- Threshold mapping score → risk level
-- Scoring breakdown returned in output for transparency
+analyze_contract(contract_text, title, source_type)
 
-## Evaluation hooks
-- Unit tests for schema invariants, evidence requirement, and scoring monotonicity
-- Harness stub can be expanded to labeled datasets
-- Versioning supports reproducibility (model/prompt/ruleset)
+Returns: AnalysisResult (Pydantic schema)
+
+This ensures DS experimentation does not break UI or downstream
+integrations.
+
+## Feature-First Pipeline
+
+1.  Parse contract text
+2.  Extract structured features (`feature_extractor.py`)
+3.  Map obligations
+4.  Generate findings
+5.  Compute score + breakdown
+6.  Return schema-validated result + audit log
+
+## Explainable Scoring Model
+
+-   Severity weights (configurable)
+-   Aggregation logic
+-   Threshold mapping score → risk level
+-   Breakdown returned in output
+
+## Governance & Evaluation Hooks
+
+-   Unit tests enforce schema invariants
+-   Evidence required for findings
+-   Scoring monotonicity checks
+-   Version metadata supports reproducibility
+-   RAG index grounding for regulation traceability

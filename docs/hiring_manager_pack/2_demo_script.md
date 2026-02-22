@@ -1,21 +1,51 @@
-# 2–3 Minute Demo Script (Citi-ready)
+# 2--3 Minute Demo Script (Enterprise Framing)
 
 ## Goal
-Show a working, enterprise-style GenAI demo with DS/Eng collaboration patterns: schema contracts, features layer, explainable scoring, evidence, audit log, export.
+
+Demonstrate a production-style GenAI system with: - Structured outputs -
+Multi-agent pipeline - Explainable scoring - DS/Engineering separation -
+Audit-ready traceability
 
 ## Start
-Run:
-- `py -m streamlit run streamlit_ui/dashboard.py`
-Open: `http://localhost:8501`
 
-## Flow
-1) Upload sample contract text
-2) Show risk score + level + findings count
-3) Expand a finding in Risk Register
-4) Show extracted features (DS handshake)
-5) Show scoring breakdown (weights + thresholds)
-6) Show evidence snippet
-7) Download JSON export
+Run: py -m streamlit run streamlit_ui/dashboard.py Open:
+http://localhost:8501
 
-## Close statement (say this)
-“The UI depends only on a stable adapter + strict schemas. DS can evolve modeling, calibration, and scoring behind the adapter without UI rewrites—exactly how we reduce integration risk in enterprise delivery.”
+## Demo Flow
+
+### 1. Upload contract
+
+Show: - Overall Risk Score - Risk Level - Findings count
+
+Explain: "The system converts unstructured contract text into a
+structured risk register with scoring."
+
+### 2. Expand a Finding
+
+Show: - Risk level - Obligation reference - Clause evidence - Reasoning
+
+Say: "Each finding includes traceable clause evidence, enabling audit
+defensibility."
+
+### 3. Show Executive Scorecard
+
+Explain: - Score aggregation - Severity mapping - Risk threshold logic
+
+Say: "Scoring is deterministic and transparent --- not opaque LLM
+output."
+
+### 4. Toggle Agentic Mode
+
+Explain the multi-agent structure: Extractor → Obligation Mapper →
+Auditor → Verifier → Reviewer
+
+### 5. Show JSON Export
+
+Explain: "Output is schema-validated and API-ready for enterprise
+integration."
+
+## Close Statement
+
+"The UI depends only on a stable adapter and strict schemas. Data
+Science can evolve modeling behind that boundary without UI rewrites ---
+reducing integration risk in enterprise AI delivery."
