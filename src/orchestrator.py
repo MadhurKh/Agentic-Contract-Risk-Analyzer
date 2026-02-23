@@ -82,11 +82,10 @@ def run_agentic_contract_analysis(
     )
     verified = ver.data.get("verified_findings", [])
     flags = ver.data.get("quality_flags", [])
-    reason_counts = ver.data.get("reason_counts", {})
     needs_review = bool(ver.data.get("needs_human_review", False)) or (cfg.require_reg_citations and not rag_available)
 
     rev = run_reviewer(verified_findings=verified, config=ReviewerConfig(mode="deterministic"))
-    scorecard = rev.data.get("risk_scorecard", {}) or {}
+    scorecard = rev.data.get("risk_scorecard", {})
 
     mapped_findings: List[Finding] = []
     for f in verified:
@@ -116,6 +115,9 @@ def run_agentic_contract_analysis(
                 risk_statement=str(f.get("gap_statement", "Regulatory gap identified.")),
                 severity=sev,  # type: ignore
                 confidence=float(f.get("confidence", 0.5)),
+                status=str(f.get("status")) if f.get("status") in {"VERIFIED","NEEDS_REVIEW"} else None,
+                quality_reason_codes=[str(x) for x in (f.get("quality_reasons") or [])],
+                reg_citations=[dict(c) for c in (f.get("reg_citations") or [])],
                 evidence=ev if ev else [Evidence(clause_ref="N/A", snippet="No evidence captured.")],
                 recommendation=rec,
                 proposed_redline=None,
@@ -123,41 +125,16 @@ def run_agentic_contract_analysis(
         )
 
     score, breakdown = compute_score(mapped_findings)
-
-    # --- Single source of truth for "what the user sees" ---
-    # Align the executive scorecard + headline summary to the same score/risk-level so the UI never contradicts itself.
-    verified_count = sum(1 for f in verified if (f.get("status") == "VERIFIED"))
-    needs_review_count = sum(1 for f in verified if (f.get("status") == "NEEDS_REVIEW"))
-
-    # Normalize scorecard keys so any UI renderer can find them
-    scorecard = dict(scorecard) if isinstance(scorecard, dict) else {}
-    scorecard["risk_level"] = breakdown.risk_level
-    scorecard["score"] = float(score)
-    scorecard["overall_score"] = float(score)
-    scorecard["overall_score_0_100"] = float(score)
-    scorecard["verified_count"] = int(verified_count)
-    scorecard["needs_review_count"] = int(needs_review_count)
-    scorecard["reason_counts"] = reason_counts
-
-    # Make the "why needs review" visible even if UI doesn't have a dedicated widget
-    if needs_review_count:
-        breakdown_lines = []
-        if reason_counts.get("MISSING_REG_CITATIONS"):
-            breakdown_lines.append(f"Missing regulation citations: {reason_counts.get('MISSING_REG_CITATIONS')}")
-        if reason_counts.get("MISSING_CONTRACT_EVIDENCE"):
-            breakdown_lines.append(f"Missing contract evidence: {reason_counts.get('MISSING_CONTRACT_EVIDENCE')}")
-        if reason_counts.get("LOW_CONFIDENCE"):
-            breakdown_lines.append(f"Low confidence: {reason_counts.get('LOW_CONFIDENCE')}")
-        if breakdown_lines:
-            msg = "Needs review breakdown — " + "; ".join(breakdown_lines)
-            nxt = scorecard.get("recommended_next_steps") or []
-            if isinstance(nxt, list):
-                scorecard["recommended_next_steps"] = [msg] + nxt
-            else:
-                scorecard["recommended_next_steps"] = [msg]
-
+    # Align reviewer scorecard to scoring breakdown to avoid UI mismatches.
+    if isinstance(scorecard, dict) and breakdown is not None:
+        scorecard = dict(scorecard)
+        scorecard["overall_score_0_100"] = breakdown.normalized_score_0_100
+        scorecard["score"] = float(breakdown.normalized_score_0_100)
+        scorecard["overall_score"] = float(breakdown.normalized_score_0_100)
+        scorecard["risk_level"] = breakdown.risk_level
+        scorecard["scorecard_aligned"] = True
     top_risks = [{"category": f.category, "title": f.risk_statement[:60]} for f in mapped_findings[:3]]
-    summary = Summary(overall_risk_score=int(round(score)), risk_level=breakdown.risk_level, top_risks=top_risks)
+    summary = Summary(overall_risk_score=score, risk_level=breakdown.risk_level, top_risks=top_risks)
 
     audit_events = [
         AuditEvent(ts=now, event="UPLOAD_RECEIVED", details={"source_type": source_type, "title": title}),

@@ -1,25 +1,13 @@
-# Patch: Fix executive score blank + reduce noisy findings (Covered/Partial/Gap) + dedupe
+# Patch: Fix truncated Top Risks / Executive summary strings
 
-## Symptoms addressed
-1) Executive scorecard score shown blank in UI:
-   - UI versions differ; some expect `score` or `overall_score`.
-   - Reviewer now returns multiple aliases: `score`, `overall_score`, and canonical `overall_score_0_100`.
-
-2) Findings were repetitive and almost all "Potential gap":
-   - Auditor now classifies each obligation vs clause as:
-     - COVERED (suppressed; no finding)
-     - PARTIAL (finding with downshifted severity)
-     - GAP (finding)
-   - Deterministic lexical overlap heuristic; no LLM required.
-
-3) 23+ duplicates:
-   - Dedupe findings by (jurisdiction, obligation_id), keeping the highest severity/confidence/grounding instance.
-   - Adds `related_clause_ids` to preserve traceability.
+## What this fixes
+- Prevents mid-word truncation in **Top risks** and **Executive Scorecard** summary strings by truncating at word boundaries and appending an ellipsis (…).
 
 ## Files changed
-- src/agents/reviewer.py
-- src/agents/auditor.py
+- `src/reviewer.py`
+  - Added `_truncate_text()` helper.
+  - Updated `_summarize_title()` to use safe truncation.
 
-## Run
-- python -m pytest -q
-- streamlit run streamlit_ui/dashboard.py
+## How to apply
+1. Unzip into repo root (so `src/reviewer.py` overwrites existing).
+2. Restart Streamlit.

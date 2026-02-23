@@ -18,6 +18,10 @@ class Finding(BaseModel):
     risk_statement: str
     severity: Severity
     confidence: float = Field(ge=0.0, le=1.0)
+    # Optional verification metadata (safe additions)
+    status: Optional[Literal["VERIFIED", "NEEDS_REVIEW"]] = None
+    quality_reason_codes: List[str] = Field(default_factory=list)
+    reg_citations: List[Dict[str, Any]] = Field(default_factory=list)
     evidence: List[Evidence] = Field(default_factory=list)
     recommendation: str
     proposed_redline: Optional[str] = None
