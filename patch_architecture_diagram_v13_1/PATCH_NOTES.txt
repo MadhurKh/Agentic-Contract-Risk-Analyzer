@@ -1,9 +1,0 @@
-PATCH v13.1 — Architecture Diagram
-
-Adds:
-- docs/architecture.md
-- docs/assets/architecture.png + architecture.svg
-- docs/hiring_manager_pack/4_architecture.md
-
-Optional:
-- apply_architecture_readme_patch.bat updates README.md and README_FOR_HIRING_MANAGER.md safely (inserts section only if missing)
