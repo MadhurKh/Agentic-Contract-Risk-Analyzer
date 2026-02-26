@@ -1,0 +1,1 @@
+Replace your repo file: src/ui_view_model.py with the provided one. No other files changed.

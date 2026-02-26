@@ -1,175 +1,191 @@
-from __future__ import annotations
-
-import json
+import os
 import sys
 from pathlib import Path
-from typing import List
-
 import streamlit as st
 
-# --- Make repo root importable (so `import src.*` works when running from streamlit_ui/) ---
-_THIS = Path(__file__).resolve()
-_REPO_ROOT = _THIS.parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+# Ensure project root is on sys.path so `import src.*` works even when running from `streamlit_ui/`
+_THIS_FILE = Path(__file__).resolve()
+_PROJECT_ROOT = _THIS_FILE.parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.model_adapter import analyze_contract
-from src.schemas import AnalysisResult
 from src.ui_view_model import build_ui_view
-from src.ui_text import safe_truncate
 
+st.set_page_config(
+    page_title="Agentic Contract Risk Analyzer",
+    page_icon="🧠",
+    layout="wide",
+)
 
-st.set_page_config(page_title="Agentic Contract Risk Analyzer", layout="wide")
+# -----------------------------
+# Sidebar: Inputs (FROZEN UI)
+# -----------------------------
+st.sidebar.markdown("## Inputs")
 
+input_mode = st.sidebar.radio(
+    "Input mode",
+    ["Sample contract", "Paste text", "Upload file"],
+    index=0,
+)
 
-def _find_sample_files(repo_root: Path) -> List[Path]:
-    c1 = repo_root / "sample_data"
-    c2 = repo_root / "sample_data" / "contracts"
-    paths = []
-    for base in (c1, c2):
-        if base.exists() and base.is_dir():
-            paths.extend(sorted(base.glob("*.txt")))
-    # de-dupe
-    seen = set()
-    out = []
-    for p in paths:
-        if p.resolve() in seen:
-            continue
-        seen.add(p.resolve())
-        out.append(p)
-    return out
+contract_title = st.sidebar.text_input("Contract title", value="Uploaded Contract")
 
+sample_choice = None
+contract_text = ""
 
-def _read_text(p: Path) -> str:
-    try:
-        return p.read_text(encoding="utf-8")
-    except Exception:
-        return p.read_text(errors="ignore")
+if input_mode == "Sample contract":
+    # Default sample directory (repo-relative)
+    sample_dir = _PROJECT_ROOT / "sample_data"
+    samples = []
+    if sample_dir.exists():
+        samples = sorted([p.name for p in sample_dir.glob("*.txt")])
+    if not samples:
+        samples = ["sample_contract_large.txt"]
+    sample_choice = st.sidebar.selectbox("Choose a sample contract", samples, index=0)
+    sample_path = sample_dir / sample_choice
+    if sample_path.exists():
+        contract_text = sample_path.read_text(encoding="utf-8", errors="ignore")
+        st.sidebar.caption(f"Loaded: {sample_path.as_posix()}")
+    else:
+        contract_text = ""
+        st.sidebar.caption("Loaded: (sample file not found in sample_data/)")
 
+elif input_mode == "Paste text":
+    contract_text = st.sidebar.text_area("Paste contract text", height=260)
+else:
+    uploaded = st.sidebar.file_uploader("Upload contract file (.txt)", type=["txt"])
+    if uploaded is not None:
+        contract_text = uploaded.read().decode("utf-8", errors="ignore")
+        st.sidebar.caption(f"Loaded: {uploaded.name}")
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("## Run mode")
+
+agentic_mode = st.sidebar.toggle("Agentic mode", value=True)
+require_reg_citations = st.sidebar.toggle("Require regulation citations (local PDFs)", value=True)
+
+jurisdictions = st.sidebar.multiselect("Jurisdictions", ["EU", "AU"], default=["EU", "AU"])
+
+analyze_clicked = st.sidebar.button("Analyze", type="primary", use_container_width=True)
+
+# -----------------------------
+# Main: Results
+# -----------------------------
 st.title("Agentic Contract Risk Analyzer")
 
-with st.sidebar:
-    st.header("Input")
-    mode = st.radio("Source", ["Paste", "Upload", "Sample"], horizontal=False)
-
-    title = st.text_input("Contract title", value="Uploaded Contract")
-
-    contract_text = ""
-    if mode == "Paste":
-        contract_text = st.text_area("Paste contract text", height=260)
-        source_type = "paste"
-    elif mode == "Upload":
-        up = st.file_uploader("Upload .txt contract", type=["txt"])
-        source_type = "upload"
-        if up is not None:
-            contract_text = up.read().decode("utf-8", errors="ignore")
-            if not title or title == "Uploaded Contract":
-                title = up.name
-    else:
-        source_type = "paste"
-        samples = _find_sample_files(_REPO_ROOT)
-        if samples:
-            labels = [p.name for p in samples]
-            choice = st.selectbox("Choose a sample contract", labels, index=0)
-            p = samples[labels.index(choice)]
-            contract_text = _read_text(p)
-        else:
-            st.info("No sample contracts found. Put .txt files in sample_data/ or sample_data/contracts/.")
-
-    st.divider()
-    st.header("Run mode")
-    agentic_mode = st.toggle("Agentic mode", value=True)
-    require_citations = st.toggle("Require regulation citations", value=True)
-    jurisdictions = st.multiselect("Jurisdictions", options=["EU", "AU"], default=["EU", "AU"])
-
-    analyze = st.button("Analyze", type="primary")
-
-
-if analyze:
-    if not contract_text.strip():
-        st.warning("Please provide contract text (paste, upload, or select a sample).")
-        st.stop()
-
-    with st.spinner("Analyzing..."):
-        res = analyze_contract(
-            contract_text=contract_text,
-            title=title,
-            source_type=source_type,
+if analyze_clicked:
+    with st.spinner("Analyzing contract..."):
+        result = analyze_contract(
+            contract_text=contract_text or "",
+            title=contract_title or "Uploaded Contract",
+            # NOTE: Sample contract is a text source internally.
+            source_type=("paste" if input_mode == "Sample contract" else ("paste" if input_mode == "Paste text" else "upload")),
             agentic_mode=agentic_mode,
-            require_reg_citations=require_citations,
+            require_reg_citations=require_reg_citations,
             jurisdictions=jurisdictions,
         )
-
-    # Ensure pydantic object
-    if isinstance(res, dict):
-        result = AnalysisResult(**res)
-    else:
-        result = res
-
-    ui = build_ui_view(result)
-
-    # --- KPI row ---
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Overall Risk Score", f"{ui.score_0_100}")
-    c2.metric("Risk Level", ui.risk_level)
-    c3.metric("Verified / Needs review", f"{ui.verified_count} / {ui.needs_review_count}")
-    c4.metric("Findings", f"{len(ui.findings)}")
+        ui = build_ui_view(result)
 
     st.divider()
 
-    # --- Executive scorecard ---
-    st.subheader("Executive Scorecard")
-    st.info(ui.exec_summary)
+    left, right = st.columns([2, 1])
 
-    st.markdown("**Top Risks**")
-    for t in ui.top_risks[:5]:
-        sev = t.get("severity") or ""
-        sev_txt = f"**{sev}** — " if sev else ""
-        st.write(f"- {sev_txt}{safe_truncate(t.get('title',''), 110)}")
+    # Left: Executive Summary (bullets) + Top Risks
+    with left:
+        st.header("Executive Summary")
+
+        # Keep exact bullet formatting (do not change UI layout)
+        for line in ui.exec_summary_lines:
+            st.markdown(f"- {line}")
+
+        st.subheader("Top Risks")
+        for r in ui.top_risks:
+            sev = r.get("severity", "Unknown")
+            title = r.get("title", "")
+            if title:
+                st.markdown(f"- **{sev}** — {title}")
+
+    # Right: Score panel (frozen)
+    with right:
+        st.header("Score")
+        st.caption("Risk level")
+        st.markdown(f"## {ui.risk_level.upper()}")
+        st.caption("Score (0–100)")
+        st.markdown(f"## {ui.score_0_100}")
+        st.caption("Needs review")
+        st.markdown(f"## {ui.needs_review}")
+        st.caption("Verified")
+        st.markdown(f"## {ui.verified}")
 
     st.divider()
 
-    # --- Findings ---
-    st.subheader("Findings")
-    if not ui.findings:
-        st.success("No findings detected for the given contract.")
-    else:
-        for f in ui.findings:
-            header = f"[{f.severity}] {f.category}: {safe_truncate(f.risk_statement, 120)}"
-            with st.expander(header, expanded=False):
-                st.markdown(f"**Risk statement:** {f.risk_statement}")
-                st.markdown(f"**Recommendation:** {f.recommendation}")
+    # Findings
+    st.header("Findings")
+    for f in ui.findings:
+        sev = getattr(f, "severity", "Unknown")
+        status = getattr(f, "status", "") or ""
+        cat = getattr(f, "category", "General")
+        stmt = getattr(f, "risk_statement", "") or ""
+        conf = getattr(f, "confidence", None)
+        qreasons = getattr(f, "quality_reason_codes", None) or []
+        reg_cits = getattr(f, "reg_citations", None) or []
+        evid = getattr(f, "evidence", None) or []
+        rec = getattr(f, "recommendation", None)
 
-                st.markdown("**Evidence**")
-                if f.evidence:
-                    for e in f.evidence[:8]:
-                        st.markdown(f"- **{e.clause_ref}**: {e.snippet}")
+        header_stmt = stmt[:120] + ("..." if len(stmt) > 120 else "")
+        with st.expander(f"[{sev}] {cat}: {header_stmt}"):
+            # Status line (helps explain remaining NEEDS_REVIEW items; no layout changes)
+            cols = st.columns([1, 1, 1])
+            with cols[0]:
+                st.markdown(f"**Status:** {status or '—'}")
+            with cols[1]:
+                if conf is not None:
+                    try:
+                        st.markdown(f"**Confidence:** {float(conf):.2f}")
+                    except Exception:
+                        st.markdown(f"**Confidence:** {conf}")
                 else:
-                    st.write("No evidence captured.")
+                    st.markdown("**Confidence:** —")
+            with cols[2]:
+                st.markdown(f"**Reg citations:** {len(reg_cits)}")
 
-                # Optional verification metadata
-                if getattr(f, "status", None):
-                    st.markdown(f"**Status:** {f.status}")
-                qrc = getattr(f, "quality_reason_codes", []) or []
-                if qrc:
-                    st.markdown("**Quality checks:**")
-                    for r in qrc:
-                        st.write(f"- {r}")
+            st.write(stmt)
 
-                rc = getattr(f, "reg_citations", []) or []
-                if rc:
-                    st.markdown("**Regulation citations (raw):**")
-                    st.json(rc[:3])
+            if qreasons:
+                st.markdown("**Needs review because:**")
+                for r in qreasons:
+                    st.markdown(f"- {r}")
 
-    st.divider()
+            if rec:
+                st.markdown("**Recommendation**")
+                st.write(rec)
 
-    # --- Raw JSON ---
-    with st.expander("Raw JSON output", expanded=False):
-        st.code(result.model_dump_json(indent=2), language="json")
-        st.download_button(
-            "Download JSON",
-            data=result.model_dump_json(indent=2),
-            file_name="analysis_result.json",
-            mime="application/json",
-        )
+            if evid:
+                st.markdown("**Evidence**")
+                # Show clause_ref + snippet (clause_ref will show doc_id for regulation evidence)
+                for e in evid:
+                    try:
+                        clause_ref = getattr(e, "clause_ref", "") or ""
+                        snippet = getattr(e, "snippet", "") or ""
+                    except Exception:
+                        clause_ref = ""
+                        snippet = ""
+                    if clause_ref:
+                        st.markdown(f"**{clause_ref}**")
+                    if snippet:
+                        st.code(snippet, language="text")
+
+    # Raw JSON (Option A)
+    with st.expander("Raw JSON (debug/export)", expanded=False):
+        raw_obj = getattr(ui, "raw", None)
+        if raw_obj is not None and hasattr(raw_obj, "model_dump"):
+            st.json(raw_obj.model_dump())
+        elif raw_obj is not None and hasattr(raw_obj, "dict"):
+            st.json(raw_obj.dict())
+        elif raw_obj is not None and hasattr(raw_obj, "__dict__"):
+            st.json(raw_obj.__dict__)
+        else:
+            st.json(raw_obj if raw_obj is not None else {})
+else:
+    st.info("Choose input options on the left, then click **Analyze**.")

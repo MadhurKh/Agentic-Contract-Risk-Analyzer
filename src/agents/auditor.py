@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-import re
 
 from ._common import AgentResult
 from ..rag.retriever import retrieve
@@ -13,23 +13,28 @@ from ..utils.text import keyword_set, jaccard
 @dataclass
 class AuditorConfig:
     mode: str = "tfidf_rag"
-    top_k: int = 8
+    # Increased slightly: gives reranker more candidates to choose from, improves grounding stability
+    top_k: int = 12
     min_hits_for_grounded: int = 1
     rerank: bool = True
     max_citations_per_finding: int = 3
-
-    # coverage heuristics (deterministic, no LLM)
-    covered_threshold: float = 0.22
-    partial_threshold: float = 0.12
+    # Grounding thresholds (0-1) based on lexical overlap heuristic
+    grounding_weak: float = 0.08
+    grounding_moderate: float = 0.14
+    grounding_strong: float = 0.22
 
 
 _STOPWORDS = {
     "the","and","or","to","of","in","for","a","an","is","are","be","as","on","with","by","that","this",
-    "will","shall","may","must","should","from","at","it","their","any","all","such"
+    "will","shall","may","must","should","from","at","it","their","any","all","such",
+    # extra legal filler that commonly dilutes keyword overlap
+    "including","include","without","within","where","when","what","which","whose","thereof","hereby","therein",
+    "party","parties","agreement","contract","clause","section","article","annex","schedule","appendix",
 }
 
 
 def _mk_query(clause: Dict[str, Any], obligation: Dict[str, Any]) -> str:
+    # Add tags to improve retrieval, plus clause type
     tags = " ".join([str(t) for t in (obligation.get("tags") or [])])
     return (
         f"{obligation.get('title','')} {obligation.get('requirement','')} {obligation.get('applies_if','')} "
@@ -51,17 +56,6 @@ def _severity_from(clause: Dict[str, Any], obligation: Dict[str, Any]) -> str:
     return "MEDIUM"
 
 
-def _sev_downshift(sev: str) -> str:
-    s = (sev or "MEDIUM").upper().strip()
-    if s == "CRITICAL":
-        return "HIGH"
-    if s == "HIGH":
-        return "MEDIUM"
-    if s == "MEDIUM":
-        return "LOW"
-    return "LOW"
-
-
 def _applicable_obligations_for_clause(clause: Dict[str, Any], obligations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ct = (clause.get("clause_type") or "").upper().strip()
     if not ct:
@@ -74,18 +68,59 @@ def _applicable_obligations_for_clause(clause: Dict[str, Any], obligations: List
     return out
 
 
-def _rerank_hits(hits: List[RagChunk], obligation: Dict[str, Any]) -> List[Tuple[RagChunk, float]]:
-    q = " ".join([
-        str(obligation.get("title","")),
-        str(obligation.get("requirement","")),
-        " ".join([str(t) for t in (obligation.get("tags") or [])]),
-    ])
+def _limit_tokens(tokens: set[str], max_n: int = 18) -> set[str]:
+    """Keep the most-informative tokens to avoid denominator blow-ups.
+
+    Jaccard is very sensitive to large unions; obligations often contain long requirement text.
+    Keeping longer tokens generally preserves semantic signal (e.g., 'transparency', 'governance', 'notification').
+    """
+    if len(tokens) <= max_n:
+        return tokens
+    return set(sorted(tokens, key=lambda t: (len(t), t), reverse=True)[:max_n])
+
+
+def _obligation_query_tokens(obligation: Dict[str, Any]) -> set[str]:
+    title = str(obligation.get("title", ""))
+    req = str(obligation.get("requirement", ""))
+    tags = " ".join([str(t) for t in (obligation.get("tags") or [])])
+
+    # Base keyword set
+    q = " ".join([title, req, tags]).strip()
     qset = keyword_set(q, stop=_STOPWORDS)
+
+    # Add obligation_id fragments (often encode domain keywords)
+    obl_id = str(obligation.get("obligation_id", ""))
+    if obl_id:
+        parts = [p for p in re.split(r"[-_]+", obl_id.lower()) if p and p not in _STOPWORDS]
+        for p in parts:
+            if len(p) >= 3:
+                qset.add(p)
+
+    return _limit_tokens(qset, max_n=18)
+
+
+def _overlap_score(qset: set[str], hset: set[str]) -> float:
+    if not qset or not hset:
+        return 0.0
+    inter = len(qset & hset)
+    # Coverage of query terms inside the hit (more stable than Jaccard when hit text is long)
+    coverage = inter / max(1, len(qset))
+    jac = jaccard(qset, hset)
+    # Blend: coverage is primary signal; jaccard prevents over-crediting very small intersections.
+    return float(0.75 * coverage + 0.25 * jac)
+
+
+def _rerank_hits(hits: List[RagChunk], obligation: Dict[str, Any]) -> List[Tuple[RagChunk, float]]:
+    # Improved lexical overlap between obligation keywords and chunk text.
+    # Uses query-term coverage (intersection / |query|) blended with jaccard.
+    qset = _obligation_query_tokens(obligation)
+
     scored: List[Tuple[RagChunk, float]] = []
     for h in hits:
         hset = keyword_set(h.text, stop=_STOPWORDS)
-        score = jaccard(qset, hset)
+        score = _overlap_score(qset, hset)
         scored.append((h, score))
+
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored
 
@@ -102,43 +137,22 @@ def _dedupe_citations(cits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
-def _coverage_score(clause_text: str, obligation: Dict[str, Any]) -> float:
-    # deterministic overlap between obligation keywords and clause text keywords
-    q = " ".join([
-        str(obligation.get("title","")),
-        str(obligation.get("requirement","")),
-        str(obligation.get("applies_if","")),
-        " ".join([str(t) for t in (obligation.get("tags") or [])]),
-    ])
-    qset = keyword_set(q, stop=_STOPWORDS)
-    cset = keyword_set(clause_text or "", stop=_STOPWORDS)
-    if not qset or not cset:
-        return 0.0
-    return jaccard(qset, cset)
+def _grounding_level(score: float, cfg: AuditorConfig) -> str:
+    if score >= cfg.grounding_strong:
+        return "STRONG"
+    if score >= cfg.grounding_moderate:
+        return "MODERATE"
+    if score >= cfg.grounding_weak:
+        return "WEAK"
+    return "NONE"
 
 
-def _coverage_label(score: float, cfg: AuditorConfig) -> str:
-    if score >= cfg.covered_threshold:
-        return "COVERED"
-    if score >= cfg.partial_threshold:
-        return "PARTIAL"
-    return "GAP"
-
-
-def _contract_evidence_from_clause(clause: Dict[str, Any]) -> List[Dict[str, Any]]:
-    spans = clause.get("evidence_spans") or []
-    if spans:
-        return spans
-    txt = (clause.get("clause_text") or "").strip()
-    if not txt:
-        return []
-    snippet = txt[:260] + ("…" if len(txt) > 260 else "")
-    return [{"clause_ref": clause.get("clause_id","N/A"), "snippet": snippet}]
-
-
-def _sev_weight(sev: str) -> int:
-    s = (sev or "MEDIUM").upper().strip()
-    return {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}.get(s, 2)
+def _fmt_source(h: RagChunk) -> str:
+    title = h.meta.get("title") or h.doc_id or "RegDoc"
+    page = h.meta.get("page")
+    if page is None or page == "":
+        return str(title)
+    return f"{title} (p.{page})"
 
 
 def run_auditor(
@@ -148,7 +162,13 @@ def run_auditor(
     rag_index: Optional[RagIndex] = None,
     config: Optional[AuditorConfig] = None,
 ) -> AgentResult:
-    """Agent 3 — Auditor (RAG-grounded) with coverage classification + dedupe."""
+    """Agent 3 — Auditor (RAG-grounded).
+
+    Output additions (non-breaking):
+    - grounding_score (0..1): lexical overlap proxy for how well citations match obligation text
+    - grounding_level: NONE/WEAK/MODERATE/STRONG
+    - reg_citations[].score + reg_citations[].source for UI friendliness
+    """
     cfg = config or AuditorConfig()
     findings: List[Dict[str, Any]] = []
     warnings: List[str] = []
@@ -164,20 +184,10 @@ def run_auditor(
         if not applicable_obls:
             continue
 
-        clause_text = (clause.get("clause_text") or "")
-        c_evidence = _contract_evidence_from_clause(clause)
-
         for obl in applicable_obls:
             juris = str(obl.get("jurisdiction", "")).upper().strip()
             reg_cits: List[Dict[str, Any]] = []
-
-            # Coverage classification BEFORE creating a finding.
-            cov_score = _coverage_score(clause_text, obl)
-            cov = _coverage_label(cov_score, cfg)
-
-            # If covered, suppress (no finding). This reduces noise and makes outputs look realistic.
-            if cov == "COVERED":
-                continue
+            top_overlap = 0.0
 
             if rag_index is not None:
                 hits = retrieve(
@@ -186,48 +196,53 @@ def run_auditor(
                     top_k=cfg.top_k,
                     filters={"jurisdiction": juris} if juris else None,
                 )
+
+                ranked: List[Tuple[RagChunk, float]] = []
                 if cfg.rerank and hits:
                     ranked = _rerank_hits(hits, obl)
-                    hits = [h for h,_ in ranked]
+                else:
+                    ranked = [(h, 0.0) for h in hits]
 
-                for h in hits:
+                if ranked:
+                    top_overlap = float(max((s for _, s in ranked), default=0.0))
+
+                for (h, s) in ranked[: cfg.max_citations_per_finding * 2]:
                     reg_cits.append({
                         "doc_id": h.doc_id,
                         "chunk_id": h.chunk_id,
                         "page": h.meta.get("page"),
                         "title": h.meta.get("title"),
-                        "excerpt": h.text[:700],
+                        "source": _fmt_source(h),
+                        "score": float(s),
+                        "excerpt": h.text[:900],
                     })
 
                 reg_cits = _dedupe_citations(reg_cits)[: cfg.max_citations_per_finding]
 
+                # Recompute top_overlap from the final citations to ensure it reflects what we actually kept.
+                if reg_cits:
+                    try:
+                        top_overlap = float(max((c.get("score", 0.0) for c in reg_cits), default=top_overlap))
+                    except Exception:
+                        pass
+
+            gap = (
+                f"Potential gap vs obligation '{obl.get('title','')}' ({juris}). "
+                f"Verify the clause includes explicit commitments matching: {obl.get('requirement','')}"
+            )
+
             sev = _severity_from(clause, obl)
-            if cov == "PARTIAL":
-                sev = _sev_downshift(sev)
+            grounding_score = float(top_overlap)
+            gl = _grounding_level(grounding_score, cfg)
 
-            # confidence: base + grounded + coverage signal
-            confidence = 0.30
+            # Confidence is a function of grounding quality + clause strength heuristics.
+            confidence = 0.35
             if reg_cits and len(reg_cits) >= cfg.min_hits_for_grounded:
-                confidence = 0.60
-            confidence += 0.15 if cov == "PARTIAL" else 0.0
-            confidence = min(0.85, confidence)
-
+                # scale 0.50..0.80 based on overlap proxy
+                confidence = 0.50 + min(0.30, grounding_score * 1.2)
             status = "DRAFT"
-            if not c_evidence:
+            if not reg_cits or len(reg_cits) < cfg.min_hits_for_grounded or gl == "NONE":
                 status = "NEEDS_REVIEW"
-            elif not reg_cits and cfg.min_hits_for_grounded > 0:
-                status = "NEEDS_REVIEW"
-
-            if cov == "PARTIAL":
-                gap = (
-                    f"Partial alignment vs obligation '{obl.get('title','')}' ({juris}). "
-                    f"Clause mentions related controls but may miss: {obl.get('requirement','')}"
-                )
-            else:
-                gap = (
-                    f"Potential gap vs obligation '{obl.get('title','')}' ({juris}). "
-                    f"Verify the clause includes explicit commitments matching: {obl.get('requirement','')}"
-                )
 
             findings.append({
                 "finding_id": f"F-{clause.get('clause_id','CL')}-{obl.get('obligation_id','OBL')}",
@@ -235,35 +250,15 @@ def run_auditor(
                 "obligation_id": obl.get("obligation_id", "UNKNOWN"),
                 "gap_statement": gap,
                 "risk_category": "REGULATORY",
-                "coverage": cov,
-                "coverage_score": round(float(cov_score), 3),
                 "severity": sev,
-                "confidence": round(float(confidence), 2),
-                "contract_evidence": c_evidence,
+                "confidence": float(confidence),
+                "grounding_score": grounding_score,
+                "grounding_level": gl,
+                "contract_evidence": clause.get("evidence_spans", []) or [],
                 "reg_citations": reg_cits,
                 "status": status,
                 "jurisdiction": juris,
                 "tags": obl.get("tags", []),
             })
 
-    # Dedupe: keep worst/most grounded per (jurisdiction, obligation_id)
-    best: Dict[tuple, Dict[str, Any]] = {}
-    for f in findings:
-        key = (f.get("jurisdiction"), f.get("obligation_id"))
-        if key not in best:
-            best[key] = f
-            best[key]["related_clause_ids"] = [f.get("clause_id")]
-            continue
-        cur = best[key]
-        cur_w = (_sev_weight(cur.get("severity")) , float(cur.get("confidence",0.0)), 1 if (cur.get("reg_citations") or []) else 0)
-        new_w = (_sev_weight(f.get("severity")) , float(f.get("confidence",0.0)), 1 if (f.get("reg_citations") or []) else 0)
-        if new_w > cur_w:
-            f["related_clause_ids"] = list(set((cur.get("related_clause_ids") or []) + [f.get("clause_id")]))
-            best[key] = f
-        else:
-            cur["related_clause_ids"] = list(set((cur.get("related_clause_ids") or []) + [f.get("clause_id")]))
-
-    deduped = list(best.values())
-    deduped.sort(key=lambda x: (_sev_weight(x.get("severity")), float(x.get("confidence",0.0))), reverse=True)
-
-    return AgentResult(data={"findings": deduped, "mode": cfg.mode}, warnings=warnings)
+    return AgentResult(data={"findings": findings, "mode": cfg.mode}, warnings=warnings)

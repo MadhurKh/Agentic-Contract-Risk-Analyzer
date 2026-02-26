@@ -31,4 +31,11 @@ logs/
 artifacts/
 .venv/
 __pycache__/
-.pytest_cache/
+.pytest_cache/# --- Demo/GitHub hygiene (append) ---
+# Virtual envs
+# Python caches
+# Local outputs (exports/logs)
+# Local RAG artifacts (rebuildable)
+# Local regulation PDFs (do not commit)
+# OS / IDE
+.idea/

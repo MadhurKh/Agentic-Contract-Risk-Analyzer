@@ -1,52 +1,71 @@
+"""UI text helpers (safe truncation + light normalization).
+
+Goals:
+- Never truncate mid-word.
+- Avoid leaving dangling punctuation like a trailing comma.
+- Provide a consistent ellipsis character.
+
+This module is intentionally dependency-free.
+"""
+
 from __future__ import annotations
 
 import re
+from typing import Optional
 
-def _balance_quotes(s: str) -> str:
-    # If odd count of single quotes, remove the last dangling quote segment
-    if s.count("'") % 2 == 1:
-        idx = s.rfind("'")
-        if idx != -1:
-            s = s[:idx].rstrip()
-    return s
+ELLIPSIS = "…"
 
-def safe_truncate(text: str, max_len: int, *, placeholder: str = "…") -> str:
-    """Truncate at word boundary (never mid-word) and avoid dangling quotes.
 
-    This is intended for UI display only.
+def _strip_trailing_punct(s: str) -> str:
+    # Remove trailing punctuation/spaces that make truncated text look broken.
+    return re.sub(r"[\s,;:\-–—\(\[\{\"\']+$", "", s).strip()
+
+
+def safe_truncate(text: Optional[str], max_chars: int, *, ellipsis: str = ELLIPSIS) -> str:
+    """Truncate at a word boundary.
+
+    If truncation happens, appends an ellipsis (default: …).
     """
-    t = (text or "").strip()
-    if len(t) <= max_len:
+
+    if not text:
+        return ""
+
+    t = str(text).strip()
+    if max_chars <= 0:
+        return ""
+
+    if len(t) <= max_chars:
         return t
 
-    cut = t[:max_len].rstrip()
+    # Reserve space for ellipsis
+    cut = max(1, max_chars - len(ellipsis))
+    candidate = t[:cut]
 
-    # Backtrack to last whitespace boundary (avoid mid-word)
-    m = re.search(r"\s+\S*$", cut)
-    if m:
-        cut = cut[: m.start()].rstrip()
+    # Prefer breaking at whitespace
+    last_space = candidate.rfind(" ")
+    if last_space >= max(10, int(cut * 0.6)):
+        candidate = candidate[:last_space]
 
-    cut = _balance_quotes(cut)
+    candidate = _strip_trailing_punct(candidate)
 
-    # Fallback hard cut if needed (e.g., single very long token)
-    if not cut:
-        cut = t[:max_len].rstrip()
-        cut = _balance_quotes(cut)
+    # If stripping made it too short (e.g., single long token), fall back to hard cut
+    if len(candidate) < max(5, int(cut * 0.4)):
+        candidate = _strip_trailing_punct(t[:cut])
 
-    # Avoid ugly trailing punctuation
-    cut = cut.rstrip(",;:-")
-    return f"{cut}{placeholder}"
+    return f"{candidate}{ellipsis}"
 
-# Backward/alternate naming (if other modules import truncate)
-def truncate(text: str, max_len: int, placeholder: str = "…") -> str:
-    return safe_truncate(text, max_len, placeholder=placeholder)
 
-def safe_list(items: list[str], *, max_items: int = 5, max_len_each: int = 90) -> list[str]:
-    out = []
-    for x in (items or [])[:max_items]:
-        out.append(safe_truncate(str(x), max_len_each))
-    return out
+def normalize_space(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", str(text)).strip()
 
-def join_phrases(items: list[str], *, max_items: int = 3, max_len_each: int = 70) -> str:
-    parts = safe_list(items, max_items=max_items, max_len_each=max_len_each)
-    return ", ".join([p for p in parts if p])
+
+def strip_wrapping_quotes(text: Optional[str]) -> str:
+    """Remove wrapping single/double quotes if present."""
+    if not text:
+        return ""
+    t = str(text).strip()
+    if (t.startswith("'") and t.endswith("'")) or (t.startswith('"') and t.endswith('"')):
+        return t[1:-1].strip()
+    return t

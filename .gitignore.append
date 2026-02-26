@@ -1,0 +1,26 @@
+# --- Demo/GitHub hygiene (append) ---
+# Virtual envs
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local outputs (exports/logs)
+outputs/
+logs/
+
+# Local RAG artifacts (rebuildable)
+data/rag_index/
+
+# Local regulation PDFs (do not commit)
+data/regulations/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

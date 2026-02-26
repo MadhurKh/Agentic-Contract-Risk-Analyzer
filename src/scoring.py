@@ -10,6 +10,11 @@ RiskLevel = Literal["Low", "Medium", "High", "Critical"]
 
 DEFAULT_WEIGHTS = SeverityWeights(Low=10, Medium=20, High=35, Critical=50)
 
+# Cap confidence contribution used for scoring to avoid score inflation when grounding heuristics improve.
+# Confidence in findings can increase when better citations/overlap are found; the *risk* score should remain
+# stable and reflect inherent exposure rather than citation-quality tuning.
+CONFIDENCE_CAP_FOR_SCORING = 0.75
+
 
 def _risk_level(score: int) -> RiskLevel:
     # Simple, explainable thresholds for a demo.
@@ -24,11 +29,15 @@ def _risk_level(score: int) -> RiskLevel:
 
 def compute_score(findings: List[Finding], weights: SeverityWeights = DEFAULT_WEIGHTS) -> Tuple[int, ScoringBreakdown]:
     """
-    Weighted severity sum with confidence.
-    points_i = weight(severity_i) * confidence_i
-    score = normalize(total_points to 0-100 with a conservative cap)
+    Demo-friendly scoring that avoids saturating at 100 when there are many findings.
 
-    This is intentionally transparent and easy to review with DS/Model Risk.
+    1) points_i = weight(severity_i) * confidence_i
+    2) focus on the worst exposures: take TOP_K findings by points (default 10)
+    3) score = normalize(avg(points_top_k)) to 0–100, anchored to "High severity" weight.
+
+    Rationale:
+    - A sum-based normalization will almost always hit 100 when there are many findings.
+    - A top-k average keeps the score sensitive to severity while staying stable across different finding counts.
     """
     items: List[ScoringBreakdownItem] = []
     total_points = 0.0
@@ -40,29 +49,43 @@ def compute_score(findings: List[Finding], weights: SeverityWeights = DEFAULT_WE
         "Critical": weights.Critical,
     }
 
+    points_list = []
     for f in findings:
         w = weight_map[f.severity]
-        pts = float(w) * float(f.confidence)
+        effective_conf = float(f.confidence)
+        if effective_conf > CONFIDENCE_CAP_FOR_SCORING:
+            effective_conf = CONFIDENCE_CAP_FOR_SCORING
+        pts = float(w) * float(effective_conf)
         total_points += pts
+        points_list.append((f.finding_id, f.severity, w, effective_conf, pts))
         items.append(
             ScoringBreakdownItem(
                 finding_id=f.finding_id,
                 severity=f.severity,
                 weight=w,
-                confidence=f.confidence,
+                confidence=effective_conf,
                 points=round(pts, 2),
             )
         )
 
-    # Conservative normalization:
-    # Assume "critical portfolio" corresponds to ~3 critical findings at confidence 1.0
-    # => max_points ~ 3 * 50 = 150
-    max_points = 150.0
-    normalized = int(round(min(100.0, (total_points / max_points) * 100.0)))
+    # Worst-exposure focus
+    if points_list:
+        points_list.sort(key=lambda x: x[4], reverse=True)
+        top_k = min(10, len(points_list))
+        top_points = [p[4] for p in points_list[:top_k]]
+        avg_top = sum(top_points) / float(top_k)
+    else:
+        top_k = 0
+        avg_top = 0.0
+
+    # Normalize against "High severity" anchor so Medium-high risks don't appear artificially low.
+    anchor = float(weights.High) if float(weights.High) > 0 else 35.0
+    normalized = int(round(min(100.0, (avg_top / anchor) * 100.0)))
 
     level = _risk_level(normalized)
 
     breakdown = ScoringBreakdown(
+        method="weighted_severity_topk_avg_v2",
         weights=weights,
         total_points=round(total_points, 2),
         normalized_score_0_100=normalized,

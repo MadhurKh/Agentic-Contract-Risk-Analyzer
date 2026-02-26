@@ -19,6 +19,11 @@ from .rag.indexer import load_index
 from .rag.store import RagIndex
 
 
+# Resolve relative paths robustly regardless of Streamlit working directory.
+# Assumes this file lives under `<repo_root>/src/orchestrator.py`.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 @dataclass
 class OrchestratorConfig:
     enabled: bool = True
@@ -33,8 +38,13 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _try_load_rag_index(path: str) -> Optional[RagIndex]:
+def _resolve_repo_path(path: str) -> Path:
     p = Path(path)
+    return p if p.is_absolute() else (_PROJECT_ROOT / p)
+
+
+def _try_load_rag_index(path: str) -> Optional[RagIndex]:
+    p = _resolve_repo_path(path)
     if not p.exists():
         return None
     try:
@@ -57,7 +67,10 @@ def run_agentic_contract_analysis(
     now = _iso_utc_now()
     features = extract_features(contract_text)
 
-    rag_index = _try_load_rag_index(cfg.rag_index_path)
+    rag_index_path = _resolve_repo_path(cfg.rag_index_path)
+    catalog_path = _resolve_repo_path(cfg.obligation_catalog_path)
+
+    rag_index = _try_load_rag_index(str(rag_index_path))
     rag_available = rag_index is not None
 
     ext = run_extractor(contract_text, config=ExtractorConfig(mode="deterministic", max_clauses=40, min_chars=160))
@@ -65,7 +78,7 @@ def run_agentic_contract_analysis(
 
     obligations: List[Dict[str, Any]] = []
     for j in cfg.jurisdictions:
-        om = run_obligation_mapper(jurisdiction=j, config=ObligationMapperConfig(mode="catalog", catalog_path=cfg.obligation_catalog_path))
+        om = run_obligation_mapper(jurisdiction=j, config=ObligationMapperConfig(mode="catalog", catalog_path=str(catalog_path)))
         obligations.extend(om.data.get("obligations", []))
 
     aud = run_auditor(
@@ -74,11 +87,12 @@ def run_agentic_contract_analysis(
         rag_index=rag_index,
         config=AuditorConfig(mode="tfidf_rag", top_k=cfg.top_k, min_hits_for_grounded=1, rerank=True, max_citations_per_finding=3),
     )
+    aud_warnings = list(getattr(aud, "warnings", None) or [])
     findings_raw = aud.data.get("findings", [])
 
     ver = run_verifier(
         findings=findings_raw,
-        config=VerifierConfig(require_contract_evidence=True, require_reg_citations=bool(cfg.require_reg_citations), min_confidence=0.25),
+        config=VerifierConfig(require_contract_evidence=True, require_reg_citations=bool(cfg.require_reg_citations), min_confidence=0.25, min_grounding_score=0.06),
     )
     verified = ver.data.get("verified_findings", [])
     flags = ver.data.get("quality_flags", [])
@@ -144,10 +158,15 @@ def run_agentic_contract_analysis(
             details={
                 "jurisdictions": cfg.jurisdictions,
                 "rag_available": rag_available,
-                "rag_index_path": cfg.rag_index_path,
+                "rag_index_path": str(rag_index_path),
+                "rag_index_exists": bool(rag_index_path.exists()),
+                "obligation_catalog_path": str(catalog_path),
+                "obligation_catalog_exists": bool(catalog_path.exists()),
                 "needs_human_review": needs_review,
+                "verifier_config": {"require_contract_evidence": True, "require_reg_citations": bool(cfg.require_reg_citations), "min_confidence": 0.25, "min_grounding_score": 0.06},
                 "quality_flags": flags,
                 "scorecard": scorecard,
+                "warnings": aud_warnings,
                 "modes": {"extractor": "deterministic", "obligation_mapper": "catalog", "auditor": "tfidf_rag+rerank", "reviewer": "deterministic"},
             },
         ),
